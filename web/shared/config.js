@@ -43,31 +43,96 @@ export const KNIFE = 4;
 // falloff = [début, fin, multiplicateur minimum]
 export const WEAPONS = [
   {
-    id: 'ar', name: "Fusil d'assaut", key: '1', auto: true, interval: 100,
+    id: 'ar', name: "Fusil d'assaut", key: '1', auto: true, interval: 100, cost: 2,
     dmg: 20, headMul: 1.5, pellets: 1, spread: 0.014,
     mag: 30, reload: 1900, falloff: [35, 90, 0.6], speed: 1.0, recoil: 0.5,
   },
   {
-    id: 'shotgun', name: 'Fusil à pompe', key: '2', auto: false, interval: 850,
+    id: 'shotgun', name: 'Fusil à pompe', key: '2', auto: false, interval: 850, cost: 2,
     dmg: 13, headMul: 1.0, pellets: 8, spread: 0.065,
     mag: 6, reload: 2400, falloff: [6, 22, 0.2], speed: 1.02, recoil: 1.6,
   },
   {
-    id: 'sniper', name: 'Sniper', key: '3', auto: false, interval: 1400,
+    id: 'sniper', name: 'Sniper', key: '3', auto: false, interval: 1400, cost: 3,
     dmg: 100, headMul: 2.0, pellets: 1, spread: 0.09, scopeSpread: 0,
     mag: 4, reload: 2800, falloff: null, speed: 0.92, recoil: 2.2, zoom: 22,
   },
   {
-    id: 'revolver', name: 'Revolver', key: '4', auto: false, interval: 480,
+    id: 'revolver', name: 'Revolver', key: '4', auto: false, interval: 480, cost: 1,
     dmg: 52, headMul: 2.0, pellets: 1, spread: 0.004,
     mag: 6, reload: 2000, falloff: [40, 90, 0.7], speed: 1.0, recoil: 1.2,
   },
   {
-    id: 'knife', name: 'Couteau', key: '5', auto: false, interval: 420,
+    id: 'knife', name: 'Couteau', key: '5', auto: false, interval: 420, cost: 0,
     dmg: 50, headMul: 1.0, pellets: 1, spread: 0, melee: true, range: 2.4, backstab: 100,
     mag: 0, reload: 0, falloff: null, speed: 1.15, recoil: 0,
   },
+  // ---- armes spéciales (index 5+) ----
+  // kind : 'rocket' (projectile explosif), 'sweep' (épée), 'grapple' (grappin), 'portal', 'chain' (foudre)
+  {
+    id: 'rocket', name: 'Lance-roquettes', kind: 'rocket', cost: 4, auto: false, interval: 1100,
+    dmg: 110, headMul: 1, pellets: 1, spread: 0.004, mag: 3, reload: 2600, falloff: null, speed: 0.9, recoil: 2.0,
+    proj: { speed: 32, gravity: 0, life: 4, radius: 4.5, minMul: 0.25, self: 0.5, knock: 15 },
+  },
+  {
+    id: 'excalibur', name: 'Excalibur', kind: 'sweep', melee: true, cost: 4, auto: false, interval: 650,
+    dmg: 65, headMul: 1, pellets: 1, spread: 0, range: 3.4, cone: 0.62, heal: 30, mag: 0, reload: 0, falloff: null, speed: 1.1, recoil: 0,
+  },
+  {
+    id: 'grapple', name: 'Grappin', kind: 'grapple', cost: 2, auto: false, interval: 3500,
+    dmg: 8, headMul: 1, pellets: 1, spread: 0, range: 40, pull: { speed: 21, ms: 700 }, mag: 0, reload: 0, falloff: null, speed: 1.0, recoil: 0,
+  },
+  {
+    id: 'portal', name: 'Pistolet portail', kind: 'portal', cost: 3, auto: false, interval: 400,
+    dmg: 0, headMul: 1, pellets: 1, spread: 0, range: 70, mag: 0, reload: 0, falloff: null, speed: 1.0, recoil: 0,
+  },
+  {
+    id: 'minigun', name: 'Minigun', cost: 4, auto: true, interval: 45,
+    dmg: 9, headMul: 1.3, pellets: 1, spread: 0.045, mag: 120, reload: 3600, falloff: [25, 60, 0.5], speed: 0.72, recoil: 0.25,
+  },
+  {
+    id: 'grenade', name: 'Lance-grenades', kind: 'rocket', cost: 3, auto: false, interval: 900,
+    dmg: 90, headMul: 1, pellets: 1, spread: 0.01, mag: 4, reload: 2400, falloff: null, speed: 0.95, recoil: 1.5,
+    proj: { speed: 22, gravity: 14, life: 3, radius: 3.8, minMul: 0.25, self: 0.5, knock: 11 },
+  },
+  {
+    id: 'tesla', name: 'Fusil à foudre', kind: 'chain', cost: 3, auto: false, interval: 480,
+    dmg: 22, headMul: 1, pellets: 1, spread: 0, range: 32, jumps: 2, jumpRange: 7, jumpMul: 0.7, mag: 20, reload: 2200, falloff: null, speed: 1.0, recoil: 0.6,
+  },
 ];
+
+// Index des armes
+export const W = { AR: 0, SHOTGUN: 1, SNIPER: 2, REVOLVER: 3, KNIFE: 4, ROCKET: 5, EXCALIBUR: 6, GRAPPLE: 7, PORTAL: 8, MINIGUN: 9, GRENADE: 10, TESLA: 11 };
+
+// Classes : un jeu d'armes (l'ordre = les touches 1, 2, 3...) + vie + vitesse.
+export const CLASSES = {
+  classic:   { id: 'classic',   name: 'Classique',      desc: 'Les 5 armes de base',                           weapons: [W.AR, W.SHOTGUN, W.SNIPER, W.REVOLVER, W.KNIFE], hp: 100, speed: 1 },
+  assault:   { id: 'assault',   name: 'Assaut',         desc: "Fusil d'assaut, lance-grenades, revolver",       weapons: [W.AR, W.GRENADE, W.REVOLVER, W.KNIFE],           hp: 100, speed: 1 },
+  sniper:    { id: 'sniper',    name: "Tireur d'élite", desc: 'Sniper, revolver, grappin (90 PV)',              weapons: [W.SNIPER, W.REVOLVER, W.GRAPPLE, W.KNIFE],       hp: 90,  speed: 1 },
+  heavy:     { id: 'heavy',     name: 'Lourd',          desc: 'Minigun, lance-roquettes, pompe (lent, 150 PV)', weapons: [W.MINIGUN, W.ROCKET, W.SHOTGUN, W.KNIFE],        hp: 150, speed: 0.88 },
+  knight:    { id: 'knight',    name: 'Chevalier',      desc: 'Excalibur, revolver, grappin (125 PV)',          weapons: [W.EXCALIBUR, W.REVOLVER, W.GRAPPLE],             hp: 125, speed: 1.02 },
+  scientist: { id: 'scientist', name: 'Scientifique',   desc: "Pistolet portail, foudre, fusil d'assaut",       weapons: [W.PORTAL, W.TESLA, W.AR, W.KNIFE],               hp: 100, speed: 1 },
+  scout:     { id: 'scout',     name: 'Éclaireur',      desc: 'Pompe, revolver, grappin (rapide, 80 PV)',       weapons: [W.SHOTGUN, W.REVOLVER, W.GRAPPLE, W.KNIFE],      hp: 80,  speed: 1.14 },
+};
+export const CUSTOM_BUDGET = 10;       // points à dépenser pour une classe perso (coût de chaque arme : WEAPONS[i].cost)
+export const CUSTOM_MAX_WEAPONS = 5;
+
+export const weaponCost = (list) => list.reduce((s, i) => s + (WEAPONS[i]?.cost ?? 99), 0);
+
+// Valide une classe demandée par un client (identifiant prédéfini, ou 'custom' + liste d'armes) : jamais de confiance aveugle.
+export function resolveClass(id, loadout) {
+  if (CLASSES[id]) return CLASSES[id];
+  if (id === 'custom' && Array.isArray(loadout)) {
+    const seen = new Set();
+    const weapons = [];
+    for (const v of loadout) {
+      const i = Number(v) | 0;
+      if (WEAPONS[i] && !seen.has(i) && weapons.length < CUSTOM_MAX_WEAPONS) { seen.add(i); weapons.push(i); }
+    }
+    if (weapons.length && weaponCost(weapons) <= CUSTOM_BUDGET) return { id: 'custom', name: 'Perso', desc: '', weapons, hp: 100, speed: 1 };
+  }
+  return CLASSES.classic;
+}
 
 export const TEAM_COLORS = { red: '#e5484d', blue: '#3e82f7' };
 export const FFA_COLORS = ['#e5484d', '#f5a524', '#f5d90a', '#46a758', '#12a594', '#3e82f7', '#8e4ec6', '#e93d82', '#a18072', '#889096'];

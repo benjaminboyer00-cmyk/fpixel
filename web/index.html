@@ -66,6 +66,14 @@
         <button class="mode" data-mode="gun"><b>🔫 Gun Game</b><small>Une arme par niveau · le couteau gagne</small><em data-count="gun"></em></button>
       </div>
 
+      <div class="f-loadout">
+        <div class="field f-class" id="f-class"><span>Classe</span><div id="cls-picker"></div></div>
+        <div class="field f-map"><span>Carte</span>
+          <select id="map" aria-label="Carte"></select>
+          <div class="cls-desc" id="map-desc"></div>
+        </div>
+      </div>
+
       <label class="field f-room">Salon privé <span class="opt">(optionnel — même nom = même salon)</span>
         <input id="room" type="text" maxlength="12" placeholder="ex : potes" autocomplete="off" spellcheck="false">
       </label>
@@ -101,7 +109,7 @@
 
       <details class="help">
         <summary>Contrôles</summary>
-        <p class="desktop-only"><b>ZQSD / WASD</b> bouger · <b>Souris</b> viser · <b>Clic gauche</b> (ou <b>F</b> / <b>Entrée</b>) tirer · <b>Clic droit</b> zoom sniper · <b>Espace</b> sauter · <b>R</b> recharger · <b>1-5 / molette</b> armes · <b>Tab</b> scores · <b>M</b> mini-carte · <b>Échap</b> pause<br>Portable sans souris : <b>flèches</b> pour viser, <b>F</b> pour tirer, et le <b>tir automatique</b> (réglages) tire tout seul quand un ennemi est dans le viseur.</p>
+        <p class="desktop-only"><b>ZQSD / WASD</b> bouger · <b>Souris</b> viser · <b>Clic gauche</b> (ou <b>F</b> / <b>Entrée</b>) tirer · <b>Clic droit</b> zoom sniper · <b>Espace</b> sauter · <b>R</b> recharger · <b>1-9 / molette</b> armes · <b>Clic droit</b> ou <b>E</b> tir secondaire (portail orange) · <b>Tab</b> scores · <b>M</b> mini-carte · <b>Échap</b> pause<br>Portable sans souris : <b>flèches</b> pour viser, <b>F</b> pour tirer, et le <b>tir automatique</b> (réglages) tire tout seul quand un ennemi est dans le viseur.</p>
         <p class="touch-only"><b>Joystick gauche</b> bouger · <b>Glisser à droite</b> viser · <b>FEU</b> tirer (glisse dessus pour viser en tirant) · <b>ZOOM</b> pour le sniper</p>
       </details>
     </div>
@@ -111,6 +119,7 @@
   <div id="pause" class="overlay hidden">
     <div class="panel small">
       <h2>PAUSE</h2>
+      <div class="field f-class" id="pause-class"><span>Classe <small>(à ta prochaine réapparition)</small></span><div id="pause-cls"></div></div>
       <button id="resume" class="btn primary">Reprendre</button>
       <button id="pause-settings" class="btn">Réglages</button>
       <button id="quit" class="btn danger">Quitter la partie</button>

@@ -1,7 +1,6 @@
 // IA des bots : ils utilisent exactement le même joueur, la même physique et le même tir que les humains
 // (le tir passe par handleFire côté serveur : mêmes dégâts, mêmes murs, mêmes plombs).
 import { stepPlayer } from '../web/js/physics.js';
-import { BOXES } from '../web/shared/map.js';
 import { rayAABB, lookDir, clamp } from '../web/shared/util.js';
 import { EYE_HEIGHT, WALK_SPEED, WEAPONS, PLAYER_RADIUS, PLAYER_HEIGHT, GUN_ORDER } from '../web/shared/config.js';
 
@@ -11,14 +10,22 @@ export const BOT_NAMES = ['Léo', 'Maya', 'Nico', 'Zoé', 'Enzo', 'Lina', 'Hugo'
 const PREF = [14, 5, 32, 10, 1.8];   // distance de combat préférée
 const RANGE = [60, 16, 100, 45, 2.2]; // ne tire pas au-delà
 
-// Points de patrouille : au sol, à distance des obstacles
-const NAV = [];
-for (let x = -26; x <= 26; x += 4) {
-  for (let z = -26; z <= 26; z += 4) {
-    const m = PLAYER_RADIUS + 0.4;
-    const blocked = BOXES.some((b) => x + m > b.x0 && x - m < b.x1 && z + m > b.z0 && z - m < b.z1 && b.y0 < PLAYER_HEIGHT);
-    if (!blocked) NAV.push({ x, z });
+// Points de patrouille : au sol, à distance des obstacles, hors de l'intérieur des bâtiments (calculés une fois par carte)
+const navCache = new Map();
+function navFor(map) {
+  let nav = navCache.get(map.id);
+  if (nav) return nav;
+  nav = [];
+  const m = PLAYER_RADIUS + 0.4, lim = map.half - 4;
+  for (let x = -lim; x <= lim; x += 4) {
+    for (let z = -lim; z <= lim; z += 4) {
+      const blocked = map.boxes.some((b) => x + m > b.x0 && x - m < b.x1 && z + m > b.z0 && z - m < b.z1 && b.y0 < PLAYER_HEIGHT);
+      const inside = map.interiors.some((r) => x > r.x0 - 1 && x < r.x1 + 1 && z > r.z0 - 1 && z < r.z1 + 1);
+      if (!blocked && !inside) nav.push({ x, z });
+    }
   }
+  navCache.set(map.id, nav);
+  return nav;
 }
 
 // Réglages par difficulté. err = imprécision de visée (rad), turn = vitesse de rotation (rad/s),
@@ -53,7 +60,7 @@ function angDiff(a, b) {
   return d;
 }
 
-function canSee(b, t, sight) {
+function canSee(b, t, sight, boxes) {
   const ex = b.x, ey = b.y + EYE_HEIGHT, ez = b.z;
   for (const ty of [t.y + 1.0, t.y + 1.6]) {
     const dx = t.x - ex, dy = ty - ey, dz = t.z - ez;
@@ -61,7 +68,7 @@ function canSee(b, t, sight) {
     if (d > sight) return false;
     const ux = dx / d, uy = dy / d, uz = dz / d;
     let blocked = false;
-    for (const bx of BOXES) {
+    for (const bx of boxes) {
       const h = rayAABB(ex, ey, ez, ux, uy, uz, bx.x0, bx.y0, bx.z0, bx.x1, bx.y1, bx.z1, d);
       if (h >= 0 && h < d - 0.3) { blocked = true; break; }
     }
@@ -76,7 +83,7 @@ function pickTarget(room, b, now) {
     if (q === b || !q.alive || now < q.protectUntil) continue;
     if (room.cfg.teams && q.team === b.team) continue;
     const d = Math.hypot(q.x - b.x, q.z - b.z);
-    if (d < bestD && canSee(b, q, b.ai.sight)) { best = q; bestD = d; }
+    if (d < bestD && canSee(b, q, b.ai.sight, room.map.boxes)) { best = q; bestD = d; }
   }
   return best;
 }
@@ -105,6 +112,15 @@ function scan(room, b, now) {
 // Fait avancer le bot d'un tick. Retourne un message de tir (comme un client) ou null.
 export function botStep(room, b, now, dt) {
   const ai = b.ai;
+  if (b.pull) { // attiré par un grappin : on se laisse tirer vers le tireur
+    const px = b.pull.x - b.x, pz = b.pull.z - b.z, pl = Math.hypot(px, pz);
+    if (now < b.pull.until && pl > 1.6) {
+      stepPlayer(b, dt / 2, px / pl, pz / pl, b.pull.speed, false, room.map);
+      stepPlayer(b, dt / 2, px / pl, pz / pl, b.pull.speed, false, room.map);
+      return null;
+    }
+    b.pull = null;
+  }
   if (now >= ai.nextScan) scan(room, b, now);
   const t = ai.target && ai.target.alive ? ai.target : null;
 
@@ -124,7 +140,8 @@ export function botStep(room, b, now, dt) {
     if (b.onGround && Math.random() < dt * 0.35) jump = true; // saute de temps en temps pour esquiver
   } else {
     // patrouille vers un point au hasard
-    if (!ai.wp || Math.hypot(ai.wp.x - b.x, ai.wp.z - b.z) < 1.5) ai.wp = NAV[(Math.random() * NAV.length) | 0];
+    const nav = navFor(room.map);
+    if (!ai.wp || Math.hypot(ai.wp.x - b.x, ai.wp.z - b.z) < 1.5) ai.wp = nav[(Math.random() * nav.length) | 0];
     desYaw = Math.atan2(-(ai.wp.x - b.x), -(ai.wp.z - b.z));
     fw = Math.abs(angDiff(b.yaw, desYaw)) < 0.7 ? 1 : 0;
     if (now - ai.lastCheck > 700) {               // coincé contre un obstacle ? on saute et on change de but
@@ -144,8 +161,8 @@ export function botStep(room, b, now, dt) {
   const l = Math.hypot(wx, wz);
   if (l > 1) { wx /= l; wz /= l; }
   const speed = WALK_SPEED * WEAPONS[b.weapon].speed * (t ? ai.speedMul : ai.speedMul * 0.8);
-  stepPlayer(b, dt / 2, wx, wz, speed, jump);
-  stepPlayer(b, dt / 2, wx, wz, speed, false);
+  stepPlayer(b, dt / 2, wx, wz, speed, jump, room.map);
+  stepPlayer(b, dt / 2, wx, wz, speed, false, room.map);
 
   // tir : réaction écoulée, bien aligné, à portée
   if (t && now - ai.seenAt >= ai.reaction && now >= ai.pause) {

@@ -1,71 +1,192 @@
-// Carte unique, symétrique, faite uniquement de boîtes alignées sur les axes.
-// Le client s'en sert pour dessiner + collisions, le serveur pour bloquer les tirs.
+// Cartes : uniquement des boîtes alignées sur les axes.
+// Le client s'en sert pour dessiner + collisions, le serveur pour bloquer les tirs et placer les joueurs.
 // Repère : X = droite, Y = haut, Z = profondeur. Rouge en z<0, Bleu en z>0.
+// yaw : 0 regarde vers -Z, PI regarde vers +Z.
 
-export const HALF = 30; // la zone de jeu va de -30 à +30 sur X et Z
-
-export const BOXES = [];
-
-// cx,cz = centre ; w = taille en X ; d = taille en Z ; h = hauteur ; y0 = base
-function add(cx, cz, w, d, h, y0 = 0, c = 'crate') {
-  BOXES.push({ x0: cx - w / 2, x1: cx + w / 2, z0: cz - d / 2, z1: cz + d / 2, y0, y1: y0 + h, c });
+// Outils communs pour construire une carte
+function builder(half) {
+  const boxes = [];
+  // cx,cz = centre ; w = taille en X ; d = taille en Z ; h = hauteur ; y0 = base
+  const add = (cx, cz, w, d, h, y0 = 0, c = 'crate') => {
+    boxes.push({ x0: cx - w / 2, x1: cx + w / 2, z0: cz - d / 2, z1: cz + d / 2, y0, y1: y0 + h, c });
+  };
+  // Même boîte, mais avec des bornes (x0,x1,z0,z1) — pratique pour les murs de maisons
+  const span = (x0, x1, z0, z1, y0, y1, c = 'wall') => { boxes.push({ x0, x1, z0, z1, y0, y1, c }); };
+  // Répète un bloc dans les 4 quadrants (miroir en X et Z).
+  const mirror4 = (cx, cz, w, d, h, y0 = 0, c = 'crate') => {
+    for (const sx of [1, -1]) {
+      if (cx === 0 && sx === -1) continue;
+      for (const sz of [1, -1]) {
+        if (cz === 0 && sz === -1) continue;
+        add(cx * sx, cz * sz, w, d, h, y0, c);
+      }
+    }
+  };
+  // Murs d'enceinte
+  const enclose = (h = 6, c = 'wall') => {
+    add(0, -half - 0.5, 2 * half + 2, 1, h, 0, c);
+    add(0, half + 0.5, 2 * half + 2, 1, h, 0, c);
+    add(-half - 0.5, 0, 1, 2 * half + 2, h, 0, c);
+    add(half + 0.5, 0, 1, 2 * half + 2, h, 0, c);
+  };
+  // Mur percé de trous (portes, fenêtres) : axis 'x' = mur le long de X à z=fixed, 'z' = le long de Z à x=fixed.
+  // holes : [{ a, b, y0, y1 }] (intervalle le long du mur + hauteurs de l'ouverture)
+  const wall = (axis, fixed, t0, t1, h, holes = [], c = 'wall', th = 0.4) => {
+    const put = (a, b, y0, y1) => {
+      if (b - a < 0.01 || y1 - y0 < 0.01) return;
+      if (axis === 'x') span(a, b, fixed - th / 2, fixed + th / 2, y0, y1, c);
+      else span(fixed - th / 2, fixed + th / 2, a, b, y0, y1, c);
+    };
+    let cur = t0;
+    for (const o of [...holes].sort((p, q) => p.a - q.a)) {
+      put(cur, o.a, 0, h);
+      put(o.a, o.b, 0, o.y0);
+      put(o.a, o.b, o.y1, h);
+      cur = o.b;
+    }
+    put(cur, t1, 0, h);
+  };
+  return { boxes, add, span, mirror4, enclose, wall };
 }
 
-// Répète un bloc dans les 4 quadrants (miroir en X et Z).
-function mirror4(cx, cz, w, d, h, y0 = 0, c = 'crate') {
+// ---------------------------------------------------------------- Arène (petite) ----
+function buildArena() {
+  const half = 30; // la zone de jeu va de -30 à +30 sur X et Z
+  const { boxes, add, mirror4, enclose } = builder(half);
+  enclose(6);
+
+  // Plateforme centrale (haut 1.5) avec escaliers sur les côtés X
+  add(0, 0, 6, 6, 1.5, 0, 'platform');
+  for (const s of [1, -1]) {
+    add(s * 3.75, 0, 1.5, 3, 1.0, 0, 'stairs');
+    add(s * 5.25, 0, 1.5, 3, 0.5, 0, 'stairs');
+  }
+
+  // Tours de sniper (haut 3.0) sur les flancs, escalier côté centre
+  for (const s of [1, -1]) {
+    add(s * 24, 0, 6, 9, 3.0, 0, 'platform');
+    add(s * 24, 4.25, 6, 0.5, 1.0, 3.0, 'wall'); // rebords
+    add(s * 24, -4.25, 6, 0.5, 1.0, 3.0, 'wall');
+    for (let i = 0; i < 5; i++) add(s * (20.4 - i * 1.2), 0, 1.2, 3, 2.5 - i * 0.5, 0, 'stairs');
+  }
+
+  // Décor répété dans chaque quadrant
+  mirror4(10, 6, 2, 2, 2, 0, 'crate');          // grosse caisse
+  mirror4(5, 9, 1.2, 1.2, 1.2, 0, 'crateDark'); // petites caisses sautables
+  mirror4(6.3, 9, 1.2, 1.2, 1.2, 0, 'crateDark');
+  mirror4(12, 3, 6, 0.6, 1.0, 0, 'low');        // muret bas
+  mirror4(3.5, 14, 5, 0.6, 1.0, 0, 'low');
+  mirror4(16, 10, 8, 0.8, 2.4, 0, 'wall');      // long mur
+  mirror4(8, 17, 0.8, 6, 2.4, 0, 'wall');       // mur en profondeur
+  mirror4(14, 18, 1.2, 1.2, 4, 0, 'pillar');    // pilier
+  mirror4(22, 20, 3, 3, 2.4, 0, 'stone');       // bloc
+
+  // Points d'apparition. team: 'red' | 'blue' | null (null = utilisé seulement hors mode équipe)
+  const spawns = [];
+  for (const x of [-22, -11, 0, 11, 22]) {
+    spawns.push({ x, z: -26, yaw: Math.PI, team: 'red' });
+    spawns.push({ x, z: 26, yaw: 0, team: 'blue' });
+  }
   for (const sx of [1, -1]) {
-    if (cx === 0 && sx === -1) continue;
     for (const sz of [1, -1]) {
-      if (cz === 0 && sz === -1) continue;
-      add(cx * sx, cz * sz, w, d, h, y0, c);
+      spawns.push({ x: sx * 27, z: sz * 16, yaw: sx > 0 ? Math.PI / 2 : -Math.PI / 2, team: null });
     }
   }
+
+  return {
+    id: 'arena', name: 'Arène', desc: 'Petite carte symétrique, combats rapprochés',
+    half, boxes, spawns, interiors: [],
+    sky: '#9ec9f0', fog: [30, 95], floor: '#5d7f4a',
+  };
 }
 
-// --- Murs d'enceinte ---
-add(0, -HALF - 0.5, 2 * HALF + 2, 1, 6, 0, 'wall');
-add(0, HALF + 0.5, 2 * HALF + 2, 1, 6, 0, 'wall');
-add(-HALF - 0.5, 0, 1, 2 * HALF + 2, 6, 0, 'wall');
-add(HALF + 0.5, 0, 1, 2 * HALF + 2, 6, 0, 'wall');
+export const DEFAULT_MAP = 'arena';
+export const mapById = (id) => MAPS[id] || MAPS[DEFAULT_MAP];
 
-// --- Plateforme centrale (haut 1.5) avec escaliers sur les côtés X ---
-add(0, 0, 6, 6, 1.5, 0, 'platform');
-for (const s of [1, -1]) {
-  add(s * 3.75, 0, 1.5, 3, 1.0, 0, 'stairs');
-  add(s * 5.25, 0, 1.5, 3, 0.5, 0, 'stairs');
-}
+// ---------------------------------------------------------------- Village (grande) ----
+function buildVillage() {
+  const half = 46;
+  const { boxes, add, span, mirror4, enclose, wall } = builder(half);
+  enclose(5, 'fence');
+  const interiors = [];
+  const DOOR = 1.6, WIN = 1.2;
 
-// --- Tours de sniper (haut 3.0) sur les flancs, escalier côté centre ---
-for (const s of [1, -1]) {
-  add(s * 24, 0, 6, 9, 3.0, 0, 'platform');
-  add(s * 24, 4.25, 6, 0.5, 1.0, 3.0, 'wall'); // rebords
-  add(s * 24, -4.25, 6, 0.5, 1.0, 3.0, 'wall');
-  for (let i = 0; i < 5; i++) {
-    add(s * (20.4 - i * 1.2), 0, 1.2, 3, 2.5 - i * 0.5, 0, 'stairs');
+  // Maison rectangulaire (centre cx,cz ; taille w x d ; hauteur 3) avec une porte par face indiquée et des fenêtres.
+  // doors : sous-ensemble de 'n' (z-), 's' (z+), 'w' (x-), 'e' (x+)
+  function house(cx, cz, w, d, doors, c = 'brick') {
+    const x0 = cx - w / 2, x1 = cx + w / 2, z0 = cz - d / 2, z1 = cz + d / 2, h = 3;
+    const openings = (len, mid, door) => {
+      const holes = [];
+      if (door) holes.push({ a: mid - DOOR / 2, b: mid + DOOR / 2, y0: 0, y1: 2.3 });
+      for (const f of [-0.3, 0.3]) {
+        const m = mid + f * len;
+        if (!door || Math.abs(f * len) > DOOR / 2 + WIN) holes.push({ a: m - WIN / 2, b: m + WIN / 2, y0: 1.0, y1: 2.0 });
+      }
+      return holes;
+    };
+    wall('x', z0, x0, x1, h, openings(w, cx, doors.includes('n')), c);
+    wall('x', z1, x0, x1, h, openings(w, cx, doors.includes('s')), c);
+    wall('z', x0, z0, z1, h, openings(d, cz, doors.includes('w')), c);
+    wall('z', x1, z0, z1, h, openings(d, cz, doors.includes('e')), c);
+    span(x0 - 0.3, x1 + 0.3, z0 - 0.3, z1 + 0.3, h, h + 0.35, 'roof'); // toit
+    interiors.push({ x0, x1, z0, z1 });
+    return { x0, x1, z0, z1 };
   }
-}
 
-// --- Décor répété dans chaque quadrant ---
-mirror4(10, 6, 2, 2, 2, 0, 'crate');          // grosse caisse
-mirror4(5, 9, 1.2, 1.2, 1.2, 0, 'crateDark'); // petites caisses sautables
-mirror4(6.3, 9, 1.2, 1.2, 1.2, 0, 'crateDark');
-mirror4(12, 3, 6, 0.6, 1.0, 0, 'low');        // muret bas
-mirror4(3.5, 14, 5, 0.6, 1.0, 0, 'low');
-mirror4(16, 10, 8, 0.8, 2.4, 0, 'wall');      // long mur
-mirror4(8, 17, 0.8, 6, 2.4, 0, 'wall');       // mur en profondeur
-mirror4(14, 18, 1.2, 1.2, 4, 0, 'pillar');    // pilier
-mirror4(22, 20, 3, 3, 2.4, 0, 'stone');       // bloc
-
-// --- Points d'apparition ---
-// team: 'red' | 'blue' | null (null = utilisé seulement hors mode équipe)
-// yaw : 0 regarde vers -Z, PI regarde vers +Z
-export const SPAWNS = [];
-for (const x of [-22, -11, 0, 11, 22]) {
-  SPAWNS.push({ x, z: -26, yaw: Math.PI, team: 'red' });
-  SPAWNS.push({ x, z: 26, yaw: 0, team: 'blue' });
-}
-for (const sx of [1, -1]) {
-  for (const sz of [1, -1]) {
-    SPAWNS.push({ x: sx * 27, z: sz * 16, yaw: sx > 0 ? Math.PI / 2 : -Math.PI / 2, team: null });
+  // Grande maison à côté du centre + sa moitié miroir : porte côté centre et côté cour
+  for (const sx of [1, -1]) {
+    for (const sz of [1, -1]) {
+      const r = house(sx * 17, sz * 15, 10, 8, [sz > 0 ? 'n' : 's', sx > 0 ? 'w' : 'e'], 'brick');
+      // mobilier : table + caisse dans la maison
+      add(sx * 17, sz * 15, 1.6, 0.9, 0.85, 0, 'wood');
+      add(sx * 20, sz * 17, 1, 1, 1, 0, 'crateDark');
+      // petite maison plus loin, crépi clair
+      house(sx * 34, sz * 9, 7, 6, [sx > 0 ? 'w' : 'e', sz > 0 ? 'n' : 's'], 'plaster');
+      add(sx * 34, sz * 9, 1.2, 0.8, 0.85, 0, 'wood');
+      // remise près du mur du fond
+      house(sx * 29, sz * 35, 6, 5, [sz > 0 ? 'n' : 's'], 'brickDark');
+    }
   }
+
+  // Place centrale : puits en pierre + quelques caisses
+  add(0, 0, 4, 4, 1.0, 0, 'stone');
+  add(0, 0, 1.6, 1.6, 2.0, 1.0, 'stone');
+  mirror4(6, 5, 1.4, 1.4, 1.2, 0, 'crate');
+  mirror4(9, 0.01, 1.2, 1.2, 1.2, 0, 'crateDark');
+
+  // Tours de guet en bois sur les flancs (haut 3), escalier côté centre
+  for (const s of [1, -1]) {
+    add(s * 42, 0, 6, 8, 3.0, 0, 'wood');
+    add(s * 42, 3.75, 6, 0.5, 1.0, 3.0, 'fence');
+    add(s * 42, -3.75, 6, 0.5, 1.0, 3.0, 'fence');
+    for (let i = 0; i < 5; i++) add(s * (38.4 - i * 1.2), 0, 1.2, 3, 2.5 - i * 0.5, 0, 'stairs');
+  }
+
+  // Clôtures basses (sautables), buissons, murets, pilier de l'église en ruine
+  mirror4(8, 25, 8, 0.4, 1.0, 0, 'fence');
+  mirror4(26, 22, 0.4, 8, 1.0, 0, 'fence');
+  mirror4(12, 33, 2.4, 2.4, 1.3, 0, 'bush');
+  mirror4(40, 20, 2.4, 2.4, 1.3, 0, 'bush');
+  mirror4(24, 3, 5, 0.6, 1.0, 0, 'low');
+  mirror4(4, 38, 6, 0.8, 2.4, 0, 'concrete');   // muret de fond
+  mirror4(22, 28, 1.2, 1.2, 3.6, 0, 'pillar');
+  mirror4(15, 4, 3, 0.8, 1.8, 0, 'metal');      // conteneur bas
+
+  // Apparitions : équipes aux deux bouts (rouge z<0, bleu z>0), les autres modes utilisent les 4 coins de la place
+  const spawns = [];
+  for (const x of [-32, -16, 0, 16, 32]) {
+    spawns.push({ x, z: -42, yaw: Math.PI, team: 'red' });
+    spawns.push({ x, z: 42, yaw: 0, team: 'blue' });
+  }
+  for (const sx of [1, -1]) {
+    for (const sz of [1, -1]) spawns.push({ x: sx * 44, z: sz * 20, yaw: sx > 0 ? Math.PI / 2 : -Math.PI / 2, team: null });
+  }
+
+  return {
+    id: 'village', name: 'Village', desc: 'Grande carte : maisons à traverser, tours de guet, places ouvertes',
+    half, boxes, spawns, interiors,
+    sky: '#b8d8f0', fog: [45, 130], floor: '#7a9a55',
+  };
 }
+
+export const MAPS = { arena: buildArena(), village: buildVillage() };

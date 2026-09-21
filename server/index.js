@@ -10,9 +10,9 @@ import { WebSocketServer } from 'ws';
 import {
   TICK_MS, REWIND_MAX_MS, MAX_RAY, EYE_HEIGHT, MAX_HP, RESPAWN_MS, SPAWN_PROTECT_MS,
   REGEN_DELAY_MS, REGEN_PER_S, END_SCREEN_MS, BODY_HALF, BODY_TOP, HEAD_HALF, HEAD_TOP,
-  MODES, WEAPONS, GUN_ORDER, KNIFE,
+  MODES, WEAPONS, GUN_ORDER, KNIFE, CLASSES, resolveClass,
 } from '../web/shared/config.js';
-import { BOXES, SPAWNS, HALF } from '../web/shared/map.js';
+import { MAPS, mapById } from '../web/shared/map.js';
 import { rayAABB, applySpread, mulberry32, clamp } from '../web/shared/util.js';
 import { BOT_NAMES, newBotAI, botStep } from './bots.js';
 
@@ -100,9 +100,10 @@ function parseOpts(m) {
     bots,
     diff: DIFF_IDS.includes(m.diff) ? m.diff : 'normal',
     limit: clamp(Math.round(Number(m.limit)) || 0, 0, 200),
+    map: MAPS[m.map] ? m.map : 'arena',
   };
 }
-const optsKey = (o) => `${o.bots}|${o.diff}|${o.limit}`;
+const optsKey = (o) => `${o.bots}|${o.diff}|${o.limit}|${o.map}`;
 
 // La capacité ne compte que les humains : les bots cèdent leur place.
 // Les salons automatiques sont partagés seulement entre joueurs qui ont choisi les mêmes options.
@@ -129,12 +130,14 @@ function createRoom(id, mode, name, opts) {
   const room = {
     id, mode, name, cfg, auto: false,
     fill: opts.bots === 0 ? 0 : opts.bots === 1 ? cfg.fill : Math.min(opts.bots, cfg.max), // joueurs visés (humains + bots)
-    diff: opts.diff, optsKey: optsKey(opts),
+    diff: opts.diff, optsKey: optsKey(opts), map: mapById(opts.map),
     killLimit: mode === 'gun' ? GUN_ORDER.length : opts.limit || Number(process.env.KILL_LIMIT) || cfg.killLimit,
     players: new Map(),
     state: mode === 'duel' ? 'waiting' : 'playing', // waiting (duel seul) | playing | ended
     teamKills: { red: 0, blue: 0 },
     endAt: 0, winner: null,
+    projs: [], nextProj: 1,        // projectiles en vol (roquettes, grenades)
+    portals: new Map(),            // id du propriétaire -> [portail bleu, portail orange]
   };
   rooms.set(id, room);
   return room;
@@ -177,6 +180,7 @@ function newPlayer(room, id, ws, name, team) {
     x: 0, y: 0, z: 0, yaw: 0, pitch: 0, weapon: 0,
     hp: 0, alive: false, k: 0, d: 0, level: 0,
     token: null, away: false, graceUntil: 0, leaving: false,
+    cls: CLASSES.classic, pending: null, loadout: CLASSES.classic.weapons.slice(), maxHp: MAX_HP, speedMul: 1, pull: null,
     respawnAt: 0, protectUntil: 0, lastDamage: 0, nextFire: 0,
     hist: [],
   };
@@ -265,8 +269,9 @@ function scoreMsg(room) {
 function pickSpawn(room, p) {
   const others = [...room.players.values()].filter((q) => q !== p && q.alive);
   const enemies = others.filter((q) => !room.cfg.teams || q.team !== p.team);
-  let pool = SPAWNS.filter((s) => (room.cfg.teams ? s.team === p.team : true));
-  if (!pool.length) pool = SPAWNS;
+  const spawns = room.map.spawns;
+  let pool = spawns.filter((s) => (room.cfg.teams ? s.team === p.team : true));
+  if (!pool.length) pool = spawns;
   const scored = pool.map((s) => {
     let dmin = 1e9;
     for (const q of enemies) dmin = Math.min(dmin, Math.hypot(q.x - s.x, q.z - s.z));
@@ -278,16 +283,24 @@ function pickSpawn(room, p) {
   return scored[0].s;
 }
 
+// Applique la classe (choisie à l'arrivée, ou changée depuis la pause : effet à la réapparition)
+function applyClass(room, p) {
+  if (p.pending) { p.cls = p.pending; p.pending = null; }
+  if (room.mode === 'gun') { p.loadout = [GUN_ORDER[shownLevel(p)], KNIFE]; p.maxHp = MAX_HP; p.speedMul = 1; }
+  else { p.loadout = p.cls.weapons.slice(); p.maxHp = p.cls.hp; p.speedMul = p.cls.speed; }
+  if (!p.loadout.includes(p.weapon)) p.weapon = p.loadout[0];
+}
+
 function spawnPlayer(room, p, now = Date.now()) {
+  applyClass(room, p);
   const s = pickSpawn(room, p);
   p.x = s.x; p.y = 0; p.z = s.z; p.yaw = s.yaw; p.pitch = 0;
   p.vx = p.vy = p.vz = 0; p.onGround = true;
-  p.hp = MAX_HP; p.alive = true;
+  p.hp = p.maxHp; p.alive = true; p.pull = null;
   p.protectUntil = now + PROTECT;
-  if (room.mode === 'gun') p.weapon = GUN_ORDER[shownLevel(p)]; // en Gun Game l'arme dépend du niveau
   p.lastDamage = 0; p.nextFire = 0;
   p.hist = [];
-  send(p, { t: 'spawn', x: s.x, y: 0, z: s.z, yaw: s.yaw, hp: MAX_HP });
+  send(p, { t: 'spawn', x: s.x, y: 0, z: s.z, yaw: s.yaw, hp: p.maxHp, maxHp: p.maxHp, loadout: p.loadout, speed: p.speedMul });
 }
 
 function resetMatch(room) {
@@ -305,6 +318,7 @@ function removePlayer(p) {
   const room = p.room;
   if (p.token && tokens.get(p.token) === p) tokens.delete(p.token);
   if (!room || !room.players.delete(p.id)) return;
+  if (room.portals.delete(p.id)) broadcast(room, { t: 'portalOff', o: p.id });
   broadcast(room, { t: 'pleave', id: p.id });
   if (!humanCount(room)) { rooms.delete(room.id); return; } // plus d'humains : on ferme (les bots partent avec)
   broadcast(room, scoreMsg(room));
@@ -337,13 +351,227 @@ function falloff(w, dist) {
   return 1 - (1 - min) * ((dist - r0) / (r1 - r0));
 }
 
+// ---- outils de tir ----
+
+// Premier obstacle de la carte le long du rayon (distance + boîte touchée)
+function rayMap(map, ox, oy, oz, dx, dy, dz, maxD) {
+  let t = maxD, box = null;
+  for (const b of map.boxes) {
+    const h = rayAABB(ox, oy, oz, dx, dy, dz, b.x0, b.y0, b.z0, b.x1, b.y1, b.z1, t);
+    if (h >= 0 && h < t) { t = h; box = b; }
+  }
+  return { t, box };
+}
+
+// Premier joueur touché (corps ou tête) avant tMax ; pad agrandit les boîtes (mêlée, foudre)
+function rayPlayers(targets, ox, oy, oz, dx, dy, dz, tMax, pad = 0) {
+  let best = null;
+  for (const tg of targets) {
+    const tb = rayAABB(ox, oy, oz, dx, dy, dz,
+      tg.x - BODY_HALF - pad, tg.y, tg.z - BODY_HALF - pad, tg.x + BODY_HALF + pad, tg.y + BODY_TOP, tg.z + BODY_HALF + pad, tMax);
+    const th = rayAABB(ox, oy, oz, dx, dy, dz,
+      tg.x - HEAD_HALF - pad, tg.y + BODY_TOP, tg.z - HEAD_HALF - pad, tg.x + HEAD_HALF + pad, tg.y + HEAD_TOP, tg.z + HEAD_HALF + pad, tMax);
+    let t = -1, head = false;
+    if (th >= 0 && (tb < 0 || th <= tb)) { t = th; head = true; } else if (tb >= 0) t = tb;
+    if (t >= 0 && t < tMax && (!best || t < best.t)) best = { tg, t, head };
+  }
+  return best;
+}
+
+// Pas de mur entre les points a et b ?
+function clearLine(map, a, b) {
+  const dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2];
+  const d = Math.hypot(dx, dy, dz);
+  if (d < 1e-3) return true;
+  const { box, t } = rayMap(map, a[0], a[1], a[2], dx / d, dy / d, dz / d, d);
+  return !box || t >= d - 0.25;
+}
+
+// Face de la boîte touchée en (px,py,pz) : la plus proche du point d'impact
+function hitNormal(box, px, py, pz) {
+  const faces = [
+    [Math.abs(px - box.x0), -1, 0, 0], [Math.abs(px - box.x1), 1, 0, 0],
+    [Math.abs(pz - box.z0), 0, 0, -1], [Math.abs(pz - box.z1), 0, 0, 1],
+    [Math.abs(py - box.y0), 0, -1, 0], [Math.abs(py - box.y1), 0, 1, 0],
+  ];
+  faces.sort((a, b) => a[0] - b[0]);
+  return { nx: faces[0][1], ny: faces[0][2], nz: faces[0][3] };
+}
+
+// Recul / attraction : les mouvements sont calculés par les clients, on leur envoie l'impulsion
+function pushPlayer(q, vx, vy, vz) {
+  if (q.bot) { q.vx += vx; q.vy += vy; q.vz += vz; q.onGround = false; }
+  else send(q, { t: 'push', v: [r2(vx), r2(vy), r2(vz)] });
+}
+function pullPlayer(q, to, pull, now) {
+  if (q.bot) q.pull = { x: to.x, z: to.z, speed: pull.speed, until: now + pull.ms };
+  else send(q, { t: 'pull', x: r2(to.x), y: r2(to.y), z: r2(to.z), sp: pull.speed, ms: pull.ms });
+}
+
+// ---- projectiles (lance-roquettes, lance-grenades) ----
+function fireProjectile(room, p, w, wi, o, d, now) {
+  const pr = w.proj;
+  const P = {
+    id: room.nextProj++, owner: p, wi, w, born: now,
+    x: o[0] + d[0] * 0.5, y: o[1] + d[1] * 0.5, z: o[2] + d[2] * 0.5,
+    vx: d[0] * pr.speed, vy: d[1] * pr.speed, vz: d[2] * pr.speed,
+  };
+  room.projs.push(P);
+  broadcast(room, { t: 'proj', id: P.id, w: wi, s: p.id, o: [r2(P.x), r2(P.y), r2(P.z)], v: [r2(P.vx), r2(P.vy), r2(P.vz)], g: pr.gravity });
+}
+
+function explode(room, P, pt, now, direct = null) {
+  const w = P.w, pr = w.proj, owner = P.owner;
+  broadcast(room, { t: 'boom', id: P.id, w: P.wi, x: r2(pt.x), y: r2(pt.y), z: r2(pt.z), r: pr.radius });
+  for (const q of [...room.players.values()]) {
+    if (!q.alive || now < q.protectUntil) continue;
+    const c = [q.x, q.y + 0.9, q.z];
+    const dist = Math.hypot(c[0] - pt.x, c[1] - pt.y, c[2] - pt.z);
+    if (dist > pr.radius) continue;
+    if (!clearLine(room.map, [pt.x, pt.y, pt.z], c)) continue; // à couvert derrière un mur
+    const f = q === direct ? 1 : 1 - (1 - pr.minMul) * (dist / pr.radius); // tir direct = dégâts complets
+    const self = q === owner;
+    const friendly = !self && room.cfg.teams && q.team === owner.team;
+    if (!friendly) applyDamage(room, owner, q, w.dmg * f * (self ? pr.self : 1), false, P.wi, now);
+    // recul : plus fort près de l'explosion, et toujours un peu vers le haut (le "rocket jump")
+    const l = dist || 1;
+    const k = pr.knock * f * (self ? 1.1 : 1);
+    pushPlayer(q, ((c[0] - pt.x) / l) * k, ((c[1] - pt.y) / l) * k + 4, ((c[2] - pt.z) / l) * k, now);
+  }
+}
+
+function stepProjectiles(room, now, dt) {
+  if (!room.projs.length) return;
+  const keep = [];
+  for (const P of room.projs) {
+    const pr = P.w.proj;
+    const nvy = P.vy - pr.gravity * dt;
+    const dx = P.vx * dt, dy = nvy * dt, dz = P.vz * dt;
+    const len = Math.hypot(dx, dy, dz);
+    let tHit = len + 1, direct = null;
+    let ux = 0, uy = 0, uz = 0;
+    if (len > 0) {
+      ux = dx / len; uy = dy / len; uz = dz / len;
+      const m = rayMap(room.map, P.x, P.y, P.z, ux, uy, uz, len);
+      if (m.box) tHit = m.t;
+      if (uy < 0 && P.y + dy <= 0) tHit = Math.min(tHit, Math.max(0, -P.y / uy)); // sol
+      for (const q of room.players.values()) {
+        if (!q.alive || now < q.protectUntil) continue;
+        if (q === P.owner && now - P.born < 150) continue;   // ne pas se toucher soi-même au départ
+        const tb = rayAABB(P.x, P.y, P.z, ux, uy, uz, q.x - 0.35, q.y, q.z - 0.35, q.x + 0.35, q.y + 1.85, q.z + 0.35, Math.min(tHit, len));
+        if (tb >= 0 && tb < tHit) { tHit = tb; direct = q; }
+      }
+    }
+    if (tHit <= len) {
+      // on recule un peu pour ne pas exploser "dans" le mur (sinon l'explosion se croit à couvert)
+      const back = Math.min(tHit, 0.2);
+      explode(room, P, { x: P.x + ux * (tHit - back), y: Math.max(0.1, P.y + uy * (tHit - back)), z: P.z + uz * (tHit - back) }, now, direct);
+      continue;
+    }
+    if (now - P.born > pr.life * 1000) { explode(room, P, { x: P.x, y: Math.max(0.1, P.y), z: P.z }, now); continue; }
+    P.x += dx; P.y += dy; P.z += dz; P.vy = nvy;
+    keep.push(P);
+  }
+  room.projs = keep;
+}
+
+// ---- épée (Excalibur) : touche tous les ennemis dans un arc devant soi ----
+function fireSweep(room, p, w, wi, o, d, targets, now) {
+  const hit = [];
+  for (const tg of targets) {
+    const c = [tg.x, tg.y + 0.9, tg.z];
+    const v = [c[0] - o[0], c[1] - o[1], c[2] - o[2]];
+    const dist = Math.hypot(v[0], v[1], v[2]);
+    if (dist > w.range + 0.4 || dist < 0.01) continue;
+    if ((v[0] * d[0] + v[1] * d[1] + v[2] * d[2]) / dist < w.cone) continue;
+    if (!clearLine(room.map, o, c)) continue;
+    hit.push(tg.q);
+  }
+  broadcast(room, { t: 'shot', id: p.id, w: wi, o: [r2(o[0]), r2(o[1]), r2(o[2])], e: [[r2(o[0] + d[0] * w.range), r2(o[1] + d[1] * w.range), r2(o[2] + d[2] * w.range)]] }, p);
+  for (const q of hit) {
+    applyDamage(room, p, q, w.dmg, false, wi, now);
+    if (!q.alive) p.hp = Math.min(p.maxHp, p.hp + w.heal); // chaque frag à l'épée soigne
+  }
+}
+
+// ---- grappin : attire l'ennemi touché vers soi ; sur un mur, c'est nous qui sommes attirés ----
+function fireGrapple(room, p, w, wi, o, d, targets, now) {
+  const wall = rayMap(room.map, o[0], o[1], o[2], d[0], d[1], d[2], w.range);
+  const pl = rayPlayers(targets, o[0], o[1], o[2], d[0], d[1], d[2], wall.t, 0.15);
+  let end;
+  if (pl) {
+    end = [o[0] + d[0] * pl.t, o[1] + d[1] * pl.t, o[2] + d[2] * pl.t];
+    applyDamage(room, p, pl.tg.q, w.dmg, pl.head, wi, now);
+    if (pl.tg.q.alive) pullPlayer(pl.tg.q, { x: p.x + d[0] * 1.2, y: p.y, z: p.z + d[2] * 1.2 }, w.pull, now);
+  } else {
+    end = [o[0] + d[0] * wall.t, o[1] + d[1] * wall.t, o[2] + d[2] * wall.t];
+    if (wall.box) {
+      const n = hitNormal(wall.box, end[0], end[1], end[2]);
+      pullPlayer(p, { x: end[0] + n.nx * 0.8, y: Math.max(0, end[1] - 1.4 + n.ny * 0.8), z: end[2] + n.nz * 0.8 }, w.pull, now);
+    }
+  }
+  broadcast(room, { t: 'shot', id: p.id, w: wi, o: [r2(o[0]), r2(o[1]), r2(o[2])], e: [end.map(r2)] }, p);
+}
+
+// ---- pistolet portail : pose un portail (bleu ou orange) sur un mur vertical ----
+const PORTAL_W = 1.0, PORTAL_H = 2.0;
+function firePortal(room, p, w, m, o, d) {
+  const which = m.alt ? 1 : 0;
+  const hit = rayMap(room.map, o[0], o[1], o[2], d[0], d[1], d[2], w.range);
+  if (!hit.box) return;
+  const px = o[0] + d[0] * hit.t, py = o[1] + d[1] * hit.t, pz = o[2] + d[2] * hit.t;
+  const n = hitNormal(hit.box, px, py, pz);
+  if (n.ny !== 0) return;                       // seulement sur les murs
+  const b = hit.box;
+  const alongX = n.nz !== 0;                    // face ±Z : le portail s'étend selon X
+  const lo = alongX ? b.x0 : b.z0, hi = alongX ? b.x1 : b.z1;
+  if (hi - lo < PORTAL_W + 0.05 || b.y1 - b.y0 < PORTAL_H + 0.05) return; // la face est trop petite
+  const along = clamp(alongX ? px : pz, lo + PORTAL_W / 2, hi - PORTAL_W / 2);
+  const cy = clamp(py, b.y0 + PORTAL_H / 2, b.y1 - PORTAL_H / 2);
+  const portal = alongX
+    ? { x: along, y: cy, z: (n.nz > 0 ? b.z1 : b.z0) + n.nz * 0.03, nx: 0, nz: n.nz }
+    : { x: (n.nx > 0 ? b.x1 : b.x0) + n.nx * 0.03, y: cy, z: along, nx: n.nx, nz: 0 };
+  const pair = room.portals.get(p.id) || [null, null];
+  pair[which] = portal;
+  room.portals.set(p.id, pair);
+  broadcast(room, { t: 'portal', o: p.id, i: which, x: r2(portal.x), y: r2(portal.y), z: r2(portal.z), nx: portal.nx, nz: portal.nz });
+}
+
+// ---- fusil à foudre : touche le premier ennemi puis saute vers les plus proches (avec moins de dégâts) ----
+function fireChain(room, p, w, wi, o, d, targets, now) {
+  const wall = rayMap(room.map, o[0], o[1], o[2], d[0], d[1], d[2], w.range);
+  const first = rayPlayers(targets, o[0], o[1], o[2], d[0], d[1], d[2], wall.t, 0.2);
+  const ends = [];
+  if (!first) {
+    ends.push([o[0] + d[0] * wall.t, o[1] + d[1] * wall.t, o[2] + d[2] * wall.t]);
+    broadcast(room, { t: 'shot', id: p.id, w: wi, o: [r2(o[0]), r2(o[1]), r2(o[2])], e: ends.map((e) => e.map(r2)), chain: true }, p);
+    return;
+  }
+  const chain = [first.tg];
+  ends.push([first.tg.x, first.tg.y + 1.1, first.tg.z]);
+  for (let j = 0; j < w.jumps; j++) {
+    const cur = chain[chain.length - 1];
+    let best = null, bd = w.jumpRange;
+    for (const tg of targets) {
+      if (chain.includes(tg)) continue;
+      const dist = Math.hypot(tg.x - cur.x, tg.y - cur.y, tg.z - cur.z);
+      if (dist < bd && clearLine(room.map, [cur.x, cur.y + 1.1, cur.z], [tg.x, tg.y + 1.1, tg.z])) { best = tg; bd = dist; }
+    }
+    if (!best) break;
+    chain.push(best);
+    ends.push([best.x, best.y + 1.1, best.z]);
+  }
+  broadcast(room, { t: 'shot', id: p.id, w: wi, o: [r2(o[0]), r2(o[1]), r2(o[2])], e: ends.map((e) => e.map(r2)), chain: true }, p);
+  let dmg = w.dmg;
+  for (const tg of chain) { applyDamage(room, p, tg.q, dmg, false, wi, now); dmg *= w.jumpMul; }
+}
+
 function handleFire(p, m, now) {
   const room = p.room;
   if (!p.alive || room.state === 'ended') return;
   const wi = m.w | 0;
   const w = WEAPONS[wi];
-  if (!w) return;
-  if (room.mode === 'gun' && wi !== GUN_ORDER[shownLevel(p)] && wi !== KNIFE) return; // Gun Game : arme du niveau, ou couteau
+  if (!w || !p.loadout.includes(wi)) return; // seules les armes de sa classe (ou de son niveau en Gun Game)
 
   // Cadence de tir (avec une tolérance pour la gigue réseau)
   if (now + 100 < p.nextFire) return;
@@ -374,26 +602,24 @@ function handleFire(p, m, now) {
     targets.push({ q, ...sampleHist(q, rewindT) });
   }
 
+  const o = [ox, oy, oz], dir = [dx, dy, dz];
+  switch (w.kind) {
+    case 'rocket': return fireProjectile(room, p, w, wi, o, applySpread(dx, dy, dz, spread, rng), now);
+    case 'sweep': return fireSweep(room, p, w, wi, o, dir, targets, now);
+    case 'grapple': return fireGrapple(room, p, w, wi, o, dir, targets, now);
+    case 'portal': return firePortal(room, p, w, m, o, dir);
+    case 'chain': return fireChain(room, p, w, wi, o, dir, targets, now);
+    default: break;
+  }
+
+  // Tir instantané (fusil d'assaut, pompe, sniper, revolver, couteau, minigun)
   const hits = new Map(); // id -> { q, dmg, head, backstab }
   const ends = [];
   for (let i = 0; i < w.pellets; i++) {
     const [px, py, pz] = applySpread(dx, dy, dz, spread, rng);
-    let tMap = maxD;
-    for (const b of BOXES) {
-      const t = rayAABB(ox, oy, oz, px, py, pz, b.x0, b.y0, b.z0, b.x1, b.y1, b.z1, tMap);
-      if (t >= 0 && t < tMap) tMap = t;
-    }
-    let best = null;
-    for (const tg of targets) {
-      const tb = rayAABB(ox, oy, oz, px, py, pz,
-        tg.x - BODY_HALF - pad, tg.y, tg.z - BODY_HALF - pad, tg.x + BODY_HALF + pad, tg.y + BODY_TOP, tg.z + BODY_HALF + pad, tMap);
-      const th = rayAABB(ox, oy, oz, px, py, pz,
-        tg.x - HEAD_HALF - pad, tg.y + BODY_TOP, tg.z - HEAD_HALF - pad, tg.x + HEAD_HALF + pad, tg.y + HEAD_TOP, tg.z + HEAD_HALF + pad, tMap);
-      let t = -1, head = false;
-      if (th >= 0 && (tb < 0 || th <= tb)) { t = th; head = true; } else if (tb >= 0) t = tb;
-      if (t >= 0 && t < tMap && (!best || t < best.t)) best = { tg, t, head };
-    }
-    const dist = best ? best.t : tMap;
+    const wall = rayMap(room.map, ox, oy, oz, px, py, pz, maxD);
+    const best = rayPlayers(targets, ox, oy, oz, px, py, pz, wall.t, pad);
+    const dist = best ? best.t : wall.t;
     ends.push([r2(ox + px * dist), r2(oy + py * dist), r2(oz + pz * dist)]);
     if (best) {
       let dmg = w.dmg * (best.head ? w.headMul : 1) * falloff(w, best.t);
@@ -423,20 +649,26 @@ function applyDamage(room, atk, vic, amount, head, wi, now) {
   vic.hp -= amount;
   vic.lastDamage = now;
   const dead = vic.hp <= 0;
-  send(atk, { t: 'hit', v: vic.id, d: Math.round(amount), h: head ? 1 : 0, k: dead ? 1 : 0 });
+  const suicide = atk === vic;
+  if (!suicide) send(atk, { t: 'hit', v: vic.id, d: Math.round(amount), h: head ? 1 : 0, k: dead ? 1 : 0 });
   if (!dead) {
     send(vic, { t: 'dmg', a: atk.id, hp: Math.ceil(vic.hp), x: r2(atk.x), z: r2(atk.z) });
     return;
   }
   vic.hp = 0; vic.alive = false; vic.d++;
   vic.respawnAt = now + RESPAWN;
+  if (suicide) { // mort par sa propre explosion : pas de frag
+    broadcast(room, { t: 'kill', a: atk.id, v: vic.id, w: wi, h: 0 });
+    broadcast(room, scoreMsg(room));
+    return;
+  }
   atk.k++;
   if (room.cfg.teams) room.teamKills[atk.team]++;
   if (room.mode === 'gun') {
     // un frag avec l'arme du niveau (ou au couteau) fait monter d'un niveau ; un frag au couteau fait aussi descendre la victime
     if (wi === GUN_ORDER[shownLevel(atk)] || wi === KNIFE) atk.level++;
     if (wi === KNIFE && vic.level > 0) vic.level--;
-    if (atk.level < GUN_ORDER.length) atk.weapon = GUN_ORDER[atk.level];
+    if (atk.level < GUN_ORDER.length) { atk.weapon = GUN_ORDER[atk.level]; atk.loadout = [atk.weapon, KNIFE]; }
   }
   broadcast(room, { t: 'kill', a: atk.id, v: vic.id, w: wi, h: head ? 1 : 0 });
   broadcast(room, scoreMsg(room));
@@ -489,14 +721,16 @@ function handleMessage(ws, raw) {
       room = findRoom(mode, cleanRoom(m.room), parseOpts(m));
       if (!room) return ws.send(JSON.stringify({ t: 'error', msg: 'Ce salon est complet.' }));
       p = addPlayer(room, ws, m.name);
+      p.cls = resolveClass(m.cls, m.loadout);
       if (token) { p.token = token; tokens.set(token, p); }
     }
     send(p, {
       t: 'welcome', id: p.id, ts: now, team: p.team,
-      room: { id: room.id, name: room.name, mode: room.mode, limit: room.killLimit, diff: room.diff, fill: room.fill },
+      room: { id: room.id, name: room.name, mode: room.mode, limit: room.killLimit, diff: room.diff, fill: room.fill, map: room.map.id },
       players: [...room.players.values()].map(publicPlayer),
       state: room.state, win: room.winner, until: room.endAt,
       teamKills: room.teamKills, back: returning,
+      portals: [...room.portals].flatMap(([o, pair]) => pair.map((q, i) => q && { o, i, x: q.x, y: q.y, z: q.z, nx: q.nx, nz: q.nz }).filter(Boolean)),
     });
     if (returning) {
       spawnPlayer(room, p, now);
@@ -515,6 +749,12 @@ function handleMessage(ws, raw) {
   const p = ws.player;
   if (!p) return;
 
+  if (m.t === 'class') { // changement de classe : pris en compte à la prochaine apparition
+    p.pending = resolveClass(m.cls, m.loadout);
+    send(p, { t: 'classok', name: p.pending.name });
+    return;
+  }
+
   if (m.t === 'leave') { // départ volontaire : pas de délai de grâce
     p.leaving = true;
     ws.player = null;
@@ -526,11 +766,12 @@ function handleMessage(ws, raw) {
     if (!p.alive) return;
     const x = +m.x, y = +m.y, z = +m.z;
     if (!Number.isFinite(x + y + z)) return;
-    p.x = clamp(x, -HALF, HALF); p.z = clamp(z, -HALF, HALF); p.y = clamp(y, -5, 20);
+    const half = p.room.map.half;
+    p.x = clamp(x, -half, half); p.z = clamp(z, -half, half); p.y = clamp(y, -5, 20);
     p.yaw = Number.isFinite(+m.yaw) ? +m.yaw : p.yaw;
     p.pitch = clamp(Number.isFinite(+m.pitch) ? +m.pitch : p.pitch, -1.6, 1.6);
     const wi = m.w | 0;
-    if (WEAPONS[wi] && !(p.room.mode === 'gun' && wi !== GUN_ORDER[shownLevel(p)] && wi !== KNIFE)) p.weapon = wi;
+    if (p.loadout.includes(wi)) p.weapon = wi;
   } else if (m.t === 'fire') {
     handleFire(p, m, now);
   }
@@ -561,12 +802,13 @@ setInterval(() => {
         if (f) handleFire(p, f, now);
       }
       if (p.alive) {
-        if (p.hp < MAX_HP && now - p.lastDamage > REGEN_DELAY_MS) p.hp = Math.min(MAX_HP, p.hp + REGEN_PER_S * (TICK_MS / 1000));
+        if (p.hp < p.maxHp && now - p.lastDamage > REGEN_DELAY_MS) p.hp = Math.min(p.maxHp, p.hp + REGEN_PER_S * (TICK_MS / 1000));
         p.hist.push([now, p.x, p.y, p.z, p.yaw]);
         while (p.hist.length && now - p.hist[0][0] > 1000) p.hist.shift();
       }
       snap.push([p.id, r2(p.x), r2(p.y), r2(p.z), r2(p.yaw), r2(p.pitch), Math.ceil(p.hp), p.weapon, p.alive && now < p.protectUntil ? 1 : 0]);
     }
+    stepProjectiles(room, now, TICK_MS / 1000);
     broadcast(room, { t: 's', ts: now, p: snap });
     for (const p of expired) removePlayer(p);
   }

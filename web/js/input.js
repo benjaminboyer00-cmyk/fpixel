@@ -27,6 +27,7 @@ export class Input {
     this._weapon = null;
     this._cycle = 0;
     this._scopeToggle = false;
+    this._alt = false;           // tir secondaire (pistolet portail) : clic droit, E, ou bouton ZOOM sur mobile
     this._mapToggle = false;
     this._arrowT = { x: 0, y: 0 };
     this._lookX = 0;
@@ -71,6 +72,7 @@ export class Input {
   takeReload() { const r = this._reload; this._reload = false; return r && this.active; }
   takeWeapon() { const w = this._weapon; this._weapon = null; return this.active ? w : null; }
   takeCycle() { const c = this._cycle; this._cycle = 0; return this.active ? c : 0; }
+  takeAlt() { const r = this._alt; this._alt = false; return r && this.active; }
   takeScopeToggle() { const r = this._scopeToggle; this._scopeToggle = false; return r && this.active; }
 
   reset() {
@@ -79,7 +81,7 @@ export class Input {
     this.scopeHeld = this.jumpHeld = this.scoreHeld = false;
     this.stick.x = this.stick.y = 0;
     this._lookX = this._lookY = 0;
-    this._reload = false; this._weapon = null; this._cycle = 0; this._scopeToggle = false; this._mapToggle = false;
+    this._reload = false; this._weapon = null; this._cycle = 0; this._scopeToggle = false; this._alt = false; this._mapToggle = false;
     this._arrowT.x = this._arrowT.y = 0;
   }
 
@@ -108,13 +110,14 @@ export class Input {
       if (c === 'Space') { e.preventDefault(); this.jumpHeld = true; return; }
       if (c === 'KeyR') { this._reload = true; return; }
       if (c === 'KeyM') { this._mapToggle = true; return; }
+      if (c === 'KeyE') { this._alt = true; return; }
       if (FIRE_KEYS.includes(c)) {
         e.preventDefault();
         if (!this.fireSrc.key) this._firePressAt = performance.now();
         this.fireSrc.key = true;
         return;
       }
-      const m = /^(?:Digit|Numpad)([1-5])$/.exec(c);
+      const m = /^(?:Digit|Numpad)([1-9])$/.exec(c);
       if (m) { this._weapon = Number(m[1]) - 1; return; }
       if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(c)) {
         e.preventDefault();
@@ -132,7 +135,7 @@ export class Input {
     document.addEventListener('mousedown', (e) => {
       if (!this.active) return;
       if (e.button === 0) { this.fireSrc.mouse = true; this._firePressAt = performance.now(); }
-      if (e.button === 2) this.scopeHeld = true;
+      if (e.button === 2) { this.scopeHeld = true; this._alt = true; }
     });
     document.addEventListener('mouseup', (e) => {
       if (e.button === 0) this.fireSrc.mouse = false;
@@ -164,7 +167,7 @@ export class Input {
         case 'jump': this.jumpHeld = on; break;
         case 'score': this.scoreHeld = on; break;
         case 'reload': if (on) this._reload = true; break;
-        case 'scope': if (on) this._scopeToggle = true; break;
+        case 'scope': if (on) { this._scopeToggle = true; this._alt = true; } break;
         case 'pause': if (on) this.onPause?.(); break;
         case 'weapon': if (on) this._weapon = arg; break;
       }

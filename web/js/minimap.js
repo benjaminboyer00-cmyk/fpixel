@@ -1,13 +1,14 @@
 // Mini-carte : toute l'arène vue de dessus (haut = côté rouge).
 // Montre TOUJOURS les coéquipiers, et les joueurs qui tirent (un anneau pendant 2 s à l'endroit du tir).
 // Les ennemis qui ne tirent pas restent invisibles : ce n'est pas un wallhack.
-import { BOXES, HALF } from '../shared/map.js';
 import { TEAM_COLORS } from '../shared/config.js';
 import { playerColor } from './hud.js';
 
 const BOX_COLORS = {
   wall: '#566172', crate: '#b07a3d', crateDark: '#835a2c', platform: '#7d91aa',
   stairs: '#9aa8ba', low: '#7f8f52', pillar: '#c1c5cc', stone: '#868b93',
+  brick: '#8a4632', brickDark: '#6a3628', roof: '#4b3c32', wood: '#7a5c39', plaster: '#c4bba4',
+  fence: '#8f7850', bush: '#356632', concrete: '#82858b', metal: '#56606c', road: '#5c5c5f',
 };
 const PING_MS = 2200;
 
@@ -18,11 +19,16 @@ export class Minimap {
     this.pings = [];
     this.visible = true;
     this.stats = { allies: 0, pings: 0 };
-    this.resize();
+    this.map = null;
+    this.bg = null;
   }
+
+  setMap(map) { this.map = map; this.resize(); }
 
   // (re)dessine le décor une fois ; à rappeler si la taille CSS change
   resize() {
+    if (!this.map) return;
+    const HALF = this.map.half;
     const css = this.c.clientWidth || 170;
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     this.dpr = dpr;
@@ -33,7 +39,7 @@ export class Minimap {
     const g = bg.getContext('2d');
     g.fillStyle = '#233322';
     g.fillRect(0, 0, bg.width, bg.height);
-    const boxes = [...BOXES].sort((a, b) => a.y1 - b.y1);
+    const boxes = [...this.map.boxes].sort((a, b) => a.y1 - b.y1);
     for (const b of boxes) {
       const x = this.X(b.x0), y = this.Z(b.z0), w = (b.x1 - b.x0) * this.s, h = (b.z1 - b.z0) * this.s;
       g.fillStyle = BOX_COLORS[b.c] || '#666';
@@ -43,8 +49,8 @@ export class Minimap {
     this.bg = bg;
   }
 
-  X(x) { return (x + HALF + 1) * this.s; }
-  Z(z) { return (z + HALF + 1) * this.s; }
+  X(x) { return (x + this.map.half + 1) * this.s; }
+  Z(z) { return (z + this.map.half + 1) * this.s; }
 
   setVisible(v) {
     if (v === this.visible) return;
@@ -68,6 +74,7 @@ export class Minimap {
 
   // game : instance de Game (players, me, mode, myId, teamName)
   draw(game, now) {
+    if (!this.map || !this.bg) return;
     const c = this.ctx, d = this.dpr;
     c.clearRect(0, 0, this.c.width, this.c.height);
     c.drawImage(this.bg, 0, 0);

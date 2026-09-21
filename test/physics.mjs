@@ -1,6 +1,8 @@
 // Vérifie la carte et la physique du joueur sans navigateur : node test/physics.mjs
 import { stepPlayer } from '../web/js/physics.js';
-import { BOXES, SPAWNS } from '../web/shared/map.js';
+import { MAPS } from '../web/shared/map.js';
+const arena = MAPS.arena;
+const BOXES = arena.boxes;
 import { PLAYER_RADIUS as R, PLAYER_HEIGHT as H } from '../web/shared/config.js';
 
 let failed = 0;
@@ -14,15 +16,17 @@ function run(p, secs, wx, wz, { speed = 6.5, jumpEvery = 0 } = {}) {
   let maxY = p.y, t = 0;
   for (let i = 0; i < secs * 60; i++, t += dt) {
     const jump = jumpEvery && Math.floor(t / jumpEvery) !== Math.floor((t - dt) / jumpEvery);
-    stepPlayer(p, dt, wx, wz, speed, jump);
+    stepPlayer(p, dt, wx, wz, speed, jump, arena);
     maxY = Math.max(maxY, p.y);
   }
   return maxY;
 }
 
-for (const s of SPAWNS) {
-  const p = player(s.x, s.z);
-  check(`spawn (${s.x},${s.z}) libre`, !BOXES.some((b) => overlaps(p, b)));
+for (const map of Object.values(MAPS)) {
+  for (const s of map.spawns) {
+    const p = player(s.x, s.z);
+    check(`[${map.id}] spawn (${s.x},${s.z}) libre et dans la carte`, !map.boxes.some((b) => overlaps(p, b)) && Math.abs(s.x) < map.half && Math.abs(s.z) < map.half);
+  }
 }
 
 let p = player(10, 0);

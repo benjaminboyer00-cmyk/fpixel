@@ -59,7 +59,7 @@ class Sfx {
     o.start(t); o.stop(t + dur + 0.02);
   }
 
-  // name: ar shotgun sniper revolver knife | hit headshot kill hurt reload empty spawn
+  // name: ar shotgun sniper revolver knife rocket grenade excalibur grapple portal minigun tesla boom | hit headshot kill hurt reload empty spawn
   // opts: gain (0..1, atténuation distance), pan (-1..1)
   play(name, { gain = 1, pan = 0 } = {}) {
     if (!this.ctx || this.volume <= 0 || gain <= 0.01) return;
@@ -83,6 +83,42 @@ class Sfx {
         break;
       case 'knife':
         this._burst({ dur: 0.14, type: 'highpass', freq: 800, freqEnd: 4000, q: 0.5, gain: 0.5, out });
+        break;
+      case 'rocket':
+        this._burst({ dur: 0.5, type: 'lowpass', freq: 1800, freqEnd: 200, gain: 1.1, out });
+        this._tone({ dur: 0.35, freq: 200, freqEnd: 60, type: 'sawtooth', gain: 0.5, out });
+        break;
+      case 'grenade':
+        this._burst({ dur: 0.2, type: 'lowpass', freq: 900, freqEnd: 150, gain: 1.0, out });
+        this._tone({ dur: 0.18, freq: 120, freqEnd: 45, type: 'square', gain: 0.6, out });
+        break;
+      case 'excalibur':
+        this._burst({ dur: 0.22, type: 'highpass', freq: 600, freqEnd: 5000, q: 0.6, gain: 0.7, out });
+        this._tone({ dur: 0.4, freq: 1568, freqEnd: 1500, type: 'triangle', gain: 0.18, out, delay: 0.04 });
+        break;
+      case 'grapple':
+        this._tone({ dur: 0.18, freq: 300, freqEnd: 1100, type: 'square', gain: 0.3, out });
+        this._burst({ dur: 0.12, type: 'bandpass', freq: 3000, q: 1.5, gain: 0.5, out });
+        break;
+      case 'portal':
+        this._tone({ dur: 0.25, freq: 500, freqEnd: 1300, type: 'sine', gain: 0.4, out });
+        this._tone({ dur: 0.2, freq: 700, freqEnd: 1600, type: 'triangle', gain: 0.2, out, delay: 0.03 });
+        break;
+      case 'portal2':
+        this._tone({ dur: 0.25, freq: 900, freqEnd: 350, type: 'sine', gain: 0.4, out });
+        this._tone({ dur: 0.2, freq: 1200, freqEnd: 500, type: 'triangle', gain: 0.2, out, delay: 0.03 });
+        break;
+      case 'minigun':
+        this._burst({ dur: 0.05, type: 'bandpass', freq: 1800, freqEnd: 800, q: 0.8, gain: 0.55, out });
+        this._tone({ dur: 0.04, freq: 120, freqEnd: 60, type: 'square', gain: 0.2, out });
+        break;
+      case 'tesla':
+        this._burst({ dur: 0.25, type: 'highpass', freq: 1500, freqEnd: 6000, q: 0.8, gain: 0.8, out });
+        this._tone({ dur: 0.22, freq: 1800, freqEnd: 250, type: 'sawtooth', gain: 0.3, out });
+        break;
+      case 'boom':
+        this._burst({ dur: 0.9, type: 'lowpass', freq: 1600, freqEnd: 90, gain: 1.7, out });
+        this._tone({ dur: 0.6, freq: 80, freqEnd: 25, type: 'sawtooth', gain: 0.9, out });
         break;
       case 'hit':
         this._tone({ dur: 0.05, freq: 1300, type: 'square', gain: 0.25, out });

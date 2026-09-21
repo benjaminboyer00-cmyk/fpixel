@@ -27,24 +27,30 @@ export class Hud {
   }
 
   _buildWeaponBars() {
-    const bar = $('weapons'), tbar = $('t-weapons');
+    this.loadout = [];
     this.slots = [];
     this.tslots = [];
-    WEAPONS.forEach((w, i) => {
-      const s = el('div', { className: 'wslot' }, el('b', { textContent: w.key }), w.name.replace('Fusil ', 'F. '));
+  }
+
+  // Barre d'armes de la classe : la touche affichée est la position dans la liste (1, 2, 3...)
+  setLoadout(list) {
+    const bar = $('weapons'), tbar = $('t-weapons');
+    this.loadout = list.slice();
+    this.slots = [];
+    this.tslots = [];
+    bar.replaceChildren();
+    tbar.replaceChildren();
+    list.forEach((wi, k) => {
+      const w = WEAPONS[wi];
+      const s = el('div', { className: 'wslot' }, el('b', { textContent: String(k + 1) }), w.name.replace('Fusil ', 'F. ').replace('Lance-', 'L. '));
       bar.append(s);
       this.slots.push(s);
-      const t = el('button', { className: 'tw', textContent: w.key });
-      t.dataset.w = String(i);
+      const t = el('button', { className: 'tw', textContent: String(k + 1) });
+      t.dataset.w = String(k);
       tbar.append(t);
       this.tslots.push(t);
     });
-  }
-
-  // Gun Game : seules certaines armes sont utilisables (null = toutes)
-  setAllowed(set) {
-    this.slots.forEach((s, k) => s.classList.toggle('off', !!set && !set.has(k)));
-    this.tslots.forEach((s, k) => s.classList.toggle('off', !!set && !set.has(k)));
+    delete this.cache.sel;
   }
 
   show() { this.root.classList.remove('hidden'); }
@@ -56,13 +62,13 @@ export class Hud {
     apply($(id), value);
   }
 
-  setHp(hp) {
+  setHp(hp, max = 100) {
     hp = Math.max(0, Math.round(hp));
-    this._set('hp-text', 'hp', hp, (e, v) => {
-      e.textContent = v;
-      const f = $('hp-fill');
-      f.style.width = `${v}%`;
-      f.style.background = v > 60 ? '#46a758' : v > 30 ? '#f5a524' : '#e5484d';
+    this._set('hp-text', 'hp', `${hp}/${max}`, (e) => {
+      e.textContent = hp;
+      const f = $('hp-fill'), r = hp / max;
+      f.style.width = `${Math.min(100, r * 100)}%`;
+      f.style.background = r > 0.6 ? '#46a758' : r > 0.3 ? '#f5a524' : '#e5484d';
     });
   }
 
@@ -75,8 +81,9 @@ export class Hud {
       e.replaceChildren(w.mag ? `${ammo}` : '—', ...(w.mag ? [el('small', { textContent: ` / ${w.mag}` })] : []));
     });
     this._set('weapons', 'sel', i, () => {
-      this.slots.forEach((s, k) => s.classList.toggle('sel', k === i));
-      this.tslots.forEach((s, k) => s.classList.toggle('sel', k === i));
+      const cur = this.loadout.indexOf(i);
+      this.slots.forEach((s, k) => s.classList.toggle('sel', k === cur));
+      this.tslots.forEach((s, k) => s.classList.toggle('sel', k === cur));
     });
   }
 

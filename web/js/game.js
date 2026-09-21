@@ -1,9 +1,9 @@
 // Boucle de jeu : joueur local (prédit côté client), autres joueurs (interpolés), tirs, effets, HUD.
 import * as THREE from 'three';
 import {
-  TICK_MS, INTERP_MS, EYE_HEIGHT, MAX_HP, RESPAWN_MS, WALK_SPEED, WEAPONS, GUN_ORDER, KNIFE,
+  TICK_MS, INTERP_MS, EYE_HEIGHT, MAX_HP, RESPAWN_MS, WALK_SPEED, WEAPONS, GUN_ORDER, KNIFE, resolveClass,
 } from '../shared/config.js';
-import { BOXES } from '../shared/map.js';
+import { mapById } from '../shared/map.js';
 import { mulberry32, applySpread, lookDir, clamp, angleLerp, rayAABB } from '../shared/util.js';
 import { createWorld } from './world.js';
 import { buildPlayer, makeNameSprite } from './models.js';
@@ -32,7 +32,8 @@ export class Game {
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(70, 1, 0.05, 150);
     this.camera.rotation.order = 'YXZ';
-    createWorld(this.scene);
+    this.world = createWorld(this.scene);
+    this.map = null;
     this.fx = new Fx(this.scene);
     this.minimap = new Minimap(document.getElementById('minimap'));
 
@@ -46,6 +47,8 @@ export class Game {
     this.viewmodel = new ViewModel(this.vmScene);
 
     this.players = new Map();
+    this.portals = new Map();   // id du propriétaire -> [portail bleu, portail orange]
+    this.shake = 0;
     this.running = false;
     this.paused = false;
     this.me = null;
@@ -101,6 +104,10 @@ export class Game {
     this.room = welcome.room;
     this.mode = welcome.room.mode;
     this.limit = welcome.room.limit;
+    this.map = mapById(welcome.room.map);
+    this.world.load(this.map);
+    this.minimap.setMap(this.map);
+    this.camera.far = this.map.fog[1] + 40;
     this.gun = welcome.room.mode === 'gun';
     const mine = welcome.players.find((p) => p.id === welcome.id);
     this.state = welcome.state;
@@ -109,16 +116,21 @@ export class Game {
     this.teamKills = welcome.teamKills || { red: 0, blue: 0 };
     this.net.syncFromWelcome(welcome.ts);
 
+    const s0 = this.getSettings();
+    const level = mine?.lvl ?? 0;
+    const loadout = this.gun ? [GUN_ORDER[level], KNIFE] : resolveClass(s0.cls, s0.custom).weapons.slice();
     this.me = {
       x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, onGround: true, yaw: 0, pitch: 0,
-      level: mine?.lvl ?? 0,
-      hp: MAX_HP, alive: false, spawned: false, weapon: this.gun ? GUN_ORDER[mine?.lvl ?? 0] : 0, ammo: WEAPONS.map((w) => w.mag),
+      level, loadout, maxHp: MAX_HP, speedMul: 1, pull: null, portalUntil: 0,
+      hp: MAX_HP, alive: false, spawned: false, weapon: loadout[0], ammo: WEAPONS.map((w) => w.mag),
       reloadUntil: 0, nextFire: 0, switchUntil: 0, scoped: false, scopeToggle: false,
       respawnAt: 0, killer: null, deadT: 0, prot: 0, lastSend: 0,
     };
     for (const p of welcome.players) this._addPlayer(p);
+    this.portals.clear();
+    for (const q of welcome.portals || []) this._setPortal(q);
     this.viewmodel.setWeapon(this.me.weapon);
-    this.hud.setAllowed(this._allowedSet());
+    this.hud.setLoadout(loadout);
     this.fov = 0;
     this._applyFov(true);
     this.scoreDirty = true;
@@ -132,7 +144,7 @@ export class Game {
     this.minimap.resize();
     this.hud.hint(isTouch
       ? 'Joystick : bouger · glisser à droite : viser · le tir est automatique sur un ennemi'
-      : 'F / Entrée : tirer · Flèches : viser · M : mini-carte · tir auto activé (réglages)', 10000);
+      : 'F / Entrée : tirer · Flèches : viser · 1-9 : armes · E / clic droit : tir secondaire · M : mini-carte', 10000);
     document.body.classList.add('ingame');
     this._raf = requestAnimationFrame((t) => this._frame(t));
   }
@@ -142,6 +154,7 @@ export class Game {
     cancelAnimationFrame(this._raf);
     for (const p of this.players.values()) this._removeModel(p);
     this.players.clear();
+    this.portals.clear();
     this.fx.clear();
     this.minimap.clear();
     this.input.enabled = false;
@@ -240,6 +253,34 @@ export class Game {
       this.teamKills = m.team;
       this.scoreDirty = true;
     });
+    n.on('proj', (m) => {
+      const id = WEAPONS[m.w]?.id;
+      this.fx.addProj(m.id, id, m.o[0], m.o[1], m.o[2], m.v[0], m.v[1], m.v[2], m.g);
+    });
+    n.on('boom', (m) => {
+      this.fx.removeProj(m.id);
+      this.fx.explosion(m.x, m.y, m.z, m.r);
+      const cam = this.camera.position;
+      const dist = Math.hypot(m.x - cam.x, m.y - cam.y, m.z - cam.z);
+      sfx.play('boom', { gain: Math.pow(clamp(1 - dist / 80, 0, 1), 1.3) });
+      this.shake = Math.max(this.shake, 0.06 * clamp(1 - dist / (m.r * 3), 0, 1));
+    });
+    n.on('portal', (m) => this._setPortal(m));
+    n.on('portalOff', (m) => {
+      this.portals.delete(m.o);
+      this.fx.removePortal(`${m.o}:0`); this.fx.removePortal(`${m.o}:1`);
+    });
+    n.on('push', (m) => { // recul d'explosion : impulsion calculée par le serveur
+      const me = this.me;
+      if (!me?.alive) return;
+      me.vx += m.v[0]; me.vy += m.v[1]; me.vz += m.v[2];
+      me.onGround = false;
+    });
+    n.on('pull', (m) => { // grappin : on est attiré vers un point
+      const me = this.me;
+      if (me?.alive) me.pull = { x: m.x, y: m.y, z: m.z, sp: m.sp, until: performance.now() + m.ms };
+    });
+    n.on('classok', (m) => this.hud.hint(`Classe « ${m.name} » à ta prochaine réapparition`, 4000));
     n.on('state', (m) => {
       this.state = m.s;
       this.winner = m.win;
@@ -260,8 +301,14 @@ export class Game {
     me.yaw = m.yaw; me.pitch = 0;
     me.hp = m.hp; me.alive = true; me.spawned = true; me.deadT = 0; me.killer = null;
     me.ammo = WEAPONS.map((w) => w.mag);
-    me.reloadUntil = 0; me.nextFire = 0; me.scopeToggle = false;
-    if (this.gun && !this._allowed(me.weapon)) this._switchTo(GUN_ORDER[me.level], performance.now());
+    me.reloadUntil = 0; me.nextFire = 0; me.scopeToggle = false; me.pull = null;
+    if (m.loadout) {
+      me.loadout = m.loadout.slice();
+      me.maxHp = m.maxHp ?? MAX_HP;
+      me.speedMul = m.speed ?? 1;
+      this.hud.setLoadout(me.loadout);
+      if (!me.loadout.includes(me.weapon)) this._switchTo(me.loadout[0], performance.now());
+    }
     this.hud.death(false);
     if (this.state !== 'waiting') sfx.play('spawn');
   }
@@ -308,9 +355,15 @@ export class Game {
     // léger décalage vers la main droite du tireur pour que la traînée parte de l'arme
     const yaw = p?.model.group.rotation.y ?? 0;
     const sx = ox + Math.cos(yaw) * 0.25, sz = oz - Math.sin(yaw) * 0.25, sy = oy - 0.3;
-    for (const e of m.e) {
-      this.fx.tracer(sx, sy, sz, e[0], e[1], e[2]);
-      this.fx.burst(e[0], e[1], e[2], '#cfcfcf', 2, 2, 0.3);
+    if (m.chain) {
+      this.fx.bolt([[sx, sy, sz], ...m.e]);
+    } else if (w.kind === 'grapple') {
+      this.fx.tracer(sx, sy, sz, m.e[0][0], m.e[0][1], m.e[0][2], 0xe58a2b, 0.25);
+    } else {
+      for (const e of m.e) {
+        this.fx.tracer(sx, sy, sz, e[0], e[1], e[2], w.kind === 'sweep' ? 0xdfe8f5 : 0xffe9a0);
+        this.fx.burst(e[0], e[1], e[2], '#cfcfcf', 2, 2, 0.3);
+      }
     }
     this.minimap.ping(ox, oz, p ? playerColor(this.mode, p) : '#ffffff');
     const cam = this.camera.position;
@@ -370,10 +423,11 @@ export class Game {
     }
     if (me.alive && inp.active) {
       // --- changement d'arme ---
-      let want = inp.takeWeapon();
+      const slot = inp.takeWeapon();
+      let want = slot !== null ? me.loadout[slot] : undefined;
       const cyc = inp.takeCycle();
       if (cyc) want = this._cycleWeapon(Math.sign(cyc));
-      if (want !== null && want !== me.weapon && WEAPONS[want] && this._allowed(want)) this._switchTo(want, now);
+      if (want !== undefined && want !== me.weapon && WEAPONS[want]) this._switchTo(want, now);
 
       // --- rechargement ---
       if (inp.takeReload()) this._startReload(now);
@@ -388,8 +442,15 @@ export class Game {
       // tir maintenu pour toutes les armes (cadence de l'arme) ; tir auto si un ennemi est dans le viseur
       const pressed = inp.takeFirePress(now);
       let firing = inp.fireHeld || pressed;
-      if (!firing && s.autoFire && this._enemyInCrosshair(w, me)) firing = true;
-      if (firing) this._tryFire(now);
+      if (!firing && s.autoFire && w.kind !== 'portal' && this._enemyInCrosshair(w, me)) firing = true;
+      if (w.kind === 'portal') {
+        // pistolet portail : tir = portail bleu, tir secondaire (clic droit / E / ZOOM) = portail orange
+        const alt = inp.takeAlt();
+        if (firing || alt) this._tryFire(now, alt);
+      } else {
+        inp.takeAlt();
+        if (firing) this._tryFire(now);
+      }
     } else {
       me.scoped = false;
     }
@@ -408,10 +469,21 @@ export class Game {
         wz = fz * ny + rz * nx;
       }
     }
-    const speed = WALK_SPEED * w.speed * (me.scoped ? 0.5 : 1);
+    let speed = WALK_SPEED * w.speed * (me.scoped ? 0.5 : 1) * me.speedMul;
+    if (me.pull) { // grappin : on est tiré vers le point d'accroche
+      const dx = me.pull.x - me.x, dy = me.pull.y - me.y, dz = me.pull.z - me.z, l = Math.hypot(dx, dy, dz);
+      if (!me.alive || now >= me.pull.until || l < 1.2) me.pull = null;
+      else {
+        const k = me.pull.sp / l;
+        me.vx = dx * k; me.vz = dz * k;
+        if (dy > 0.2) me.vy = Math.max(me.vy, dy * k);
+        wx = dx / l; wz = dz / l; speed = me.pull.sp;
+      }
+    }
     if (me.spawned) {
-      stepPlayer(me, dt, wx, wz, speed, active && inp.jumpHeld);
+      stepPlayer(me, dt, wx, wz, speed, active && inp.jumpHeld && !me.pull, this.map);
       if (me.y < -10) { me.y = 3; me.vy = 0; }
+      this._checkPortals(now, wx, wz);
     }
     if (me.alive) {
       // envoi de la position au serveur (20 Hz)
@@ -430,7 +502,7 @@ export class Game {
     const ex = me.x, ey = me.y + EYE_HEIGHT, ez = me.z;
     const [dx, dy, dz] = lookDir(me.yaw, me.pitch);
     let reach = w.melee ? w.range : 80;
-    for (const b of BOXES) {
+    for (const b of this.map.boxes) {
       const h = rayAABB(ex, ey, ez, dx, dy, dz, b.x0, b.y0, b.z0, b.x1, b.y1, b.z1, reach);
       if (h >= 0 && h < reach) reach = h;
     }
@@ -446,19 +518,48 @@ export class Game {
     return false;
   }
 
-  // ---- Gun Game : l'arme dépend du niveau, le couteau reste toujours utilisable ----
-  _allowed(i) { return !this.gun || i === GUN_ORDER[this.me.level] || i === KNIFE; }
-  _allowedSet() { return this.gun ? new Set([GUN_ORDER[this.me.level], KNIFE]) : null; }
-
-  _cycleWeapon(dir) {
-    let i = this.me.weapon;
-    for (let k = 0; k < WEAPONS.length; k++) {
-      i = (i + dir + WEAPONS.length) % WEAPONS.length;
-      if (this._allowed(i)) return i;
-    }
-    return this.me.weapon;
+  // ---- portails : traverser l'un ressort par l'autre, en gardant sa vitesse ----
+  _setPortal(q) {
+    const pair = this.portals.get(q.o) || [null, null];
+    pair[q.i] = { x: q.x, y: q.y, z: q.z, nx: q.nx, nz: q.nz };
+    this.portals.set(q.o, pair);
+    this.fx.setPortal(`${q.o}:${q.i}`, q.i, q.x, q.y, q.z, q.nx, q.nz);
   }
 
+  _checkPortals(now, wx, wz) {
+    const me = this.me;
+    if (!me.alive || now < me.portalUntil) return;
+    for (const pair of this.portals.values()) {
+      if (!pair[0] || !pair[1]) continue;
+      for (let i = 0; i < 2; i++) {
+        const A = pair[i], B = pair[1 - i];
+        const rx = me.x - A.x, rz = me.z - A.z;
+        const depth = rx * A.nx + rz * A.nz;               // distance devant le portail
+        const lateral = -rx * A.nz + rz * A.nx;            // décalage le long du portail
+        if (depth < -0.15 || depth > 0.55 || Math.abs(lateral) > 0.55 || Math.abs(me.y + 0.9 - A.y) > 1.0) continue;
+        const toward = wx * A.nx + wz * A.nz < -0.2 || me.vx * A.nx + me.vz * A.nz < -1;
+        if (!toward) continue;
+        const dYaw = Math.atan2(-B.nx, -B.nz) - Math.atan2(A.nx, A.nz);
+        const sp = Math.hypot(me.vx, me.vz);
+        const ang = Math.atan2(-me.vx, -me.vz) + dYaw;
+        me.x = B.x + B.nx * 0.9; me.z = B.z + B.nz * 0.9; me.y = B.y - 1.0 + 0.01;
+        if (sp < 1) { me.vx = B.nx * 4.5; me.vz = B.nz * 4.5; }
+        else { const k = Math.max(sp, 4.5); me.vx = -Math.sin(ang) * k; me.vz = -Math.cos(ang) * k; }
+        me.yaw += dYaw;
+        me.portalUntil = now + 700;
+        sfx.play('portal');
+        return;
+      }
+    }
+  }
+
+  _cycleWeapon(dir) {
+    const me = this.me, n = me.loadout.length;
+    const i = me.loadout.indexOf(me.weapon);
+    return me.loadout[((i < 0 ? 0 : i) + dir + n) % n];
+  }
+
+  // Gun Game : niveau gagné/perdu => nouvelle arme (le couteau reste toujours utilisable)
   _setLevel(lvl) {
     const me = this.me;
     if (!this.gun || lvl === me.level) return;
@@ -466,8 +567,9 @@ export class Game {
     me.level = lvl;
     const w = GUN_ORDER[lvl];
     me.ammo[w] = WEAPONS[w].mag;
+    me.loadout = [w, KNIFE];
+    this.hud.setLoadout(me.loadout);
     this._switchTo(w, performance.now());
-    this.hud.setAllowed(this._allowedSet());
     this.hud.hint(`${up ? 'Niveau supérieur' : 'Niveau perdu'} : ${lvl + 1}/${GUN_ORDER.length} — ${WEAPONS[w].name}`, 3500);
     if (up) sfx.play('spawn');
   }
@@ -489,7 +591,7 @@ export class Game {
     sfx.play('reload');
   }
 
-  _tryFire(now) {
+  _tryFire(now, alt = false) {
     const me = this.me, w = WEAPONS[me.weapon];
     if (this.state === 'ended' || now < me.nextFire || now < me.switchUntil || me.reloadUntil) return;
     if (w.mag && me.ammo[me.weapon] <= 0) {
@@ -507,7 +609,7 @@ export class Game {
     const spread = w.scopeSpread !== undefined && me.scoped ? w.scopeSpread : w.spread;
 
     this.net.send({
-      t: 'fire', w: me.weapon, seed, sc: me.scoped ? 1 : 0,
+      t: 'fire', w: me.weapon, seed, sc: me.scoped ? 1 : 0, alt: alt ? 1 : 0,
       ox: +ex.toFixed(3), oy: +ey.toFixed(3), oz: +ez.toFixed(3),
       dx: +dx.toFixed(4), dy: +dy.toFixed(4), dz: +dz.toFixed(4),
       rt: Math.round(this.net.serverNow() - INTERP_MS),
@@ -515,15 +617,28 @@ export class Game {
 
     // Effets locaux immédiats (même graine que le serveur => mêmes plombs)
     this.viewmodel.fire();
-    sfx.play(w.id);
+    sfx.play(w.kind === 'portal' && alt ? 'portal2' : w.id);
+    if (w.kind === 'portal') return;
+    if (w.kind === 'grapple' || w.kind === 'chain') {
+      // pas de message "shot" pour le tireur : on dessine le trait jusqu'au premier mur (les ennemis touchés sont gérés par le serveur)
+      let reach = w.range;
+      for (const b of this.map.boxes) {
+        const h = rayAABB(ex, ey, ez, dx, dy, dz, b.x0, b.y0, b.z0, b.x1, b.y1, b.z1, reach);
+        if (h >= 0 && h < reach) reach = h;
+      }
+      const mz = this.camera.localToWorld(this._v.set(0.2, -0.18, -0.7));
+      const end = [ex + dx * reach, ey + dy * reach, ez + dz * reach];
+      if (w.kind === 'chain') this.fx.bolt([[mz.x, mz.y, mz.z], end]);
+      else this.fx.tracer(mz.x, mz.y, mz.z, end[0], end[1], end[2], 0xe58a2b, 0.25);
+    }
     if (!w.melee) {
       const rng = mulberry32(seed);
       const mz = this.camera.localToWorld(this._v.set(0.2, -0.18, -0.7));
       const mx0 = mz.x, my0 = mz.y, mz0 = mz.z;
-      for (let i = 0; i < w.pellets; i++) {
+      for (let i = 0; i < (w.kind ? 0 : w.pellets); i++) {
         const [px, py, pz] = applySpread(dx, dy, dz, spread, rng);
         let tt = MAX_TRACER;
-        for (const b of BOXES) {
+        for (const b of this.map.boxes) {
           const h = rayAABB(ex, ey, ez, px, py, pz, b.x0, b.y0, b.z0, b.x1, b.y1, b.z1, tt);
           if (h >= 0 && h < tt) tt = h;
         }
@@ -579,7 +694,12 @@ export class Game {
       roll = 0.9 * k;
     }
     cam.position.set(me.x, eye, me.z);
-    cam.rotation.set(me.pitch, me.yaw, roll);
+    let sx = 0, sy = 0;
+    if (this.shake > 0.001) {
+      sx = (Math.random() - 0.5) * this.shake; sy = (Math.random() - 0.5) * this.shake;
+      this.shake *= Math.pow(0.02, dt);
+    }
+    cam.rotation.set(me.pitch + sx, me.yaw + sy, roll);
     this._applyFov(false);
 
     const w = WEAPONS[me.weapon];
@@ -610,7 +730,7 @@ export class Game {
 
   _updateHud(now) {
     const me = this.me;
-    this.hud.setHp(me.alive ? me.hp : 0);
+    this.hud.setHp(me.alive ? me.hp : 0, me.maxHp);
     this.hud.setWeapon(me.weapon, me.ammo[me.weapon], !!me.reloadUntil);
 
     if (!me.alive && me.spawned && this.state !== 'ended') {

@@ -37,7 +37,8 @@ export class ViewModel {
 
   fire() {
     this.kick = 1;
-    if (WEAPONS[this.cur].id !== 'knife') this.flashT = 0.05;
+    const w = WEAPONS[this.cur];
+    if (!w.melee && w.kind !== 'grapple' && w.kind !== 'portal') this.flashT = 0.05;
   }
 
   update(dt, { speed, onGround, reloadProgress, visible }) {
@@ -52,7 +53,7 @@ export class ViewModel {
     const bobX = Math.sin(this.bobT) * 0.010 * moving;
     const bobY = Math.abs(Math.cos(this.bobT)) * 0.012 * moving;
 
-    this.kick = Math.max(0, this.kick - dt * (w.id === 'knife' ? 4.5 : 9));
+    this.kick = Math.max(0, this.kick - dt * (w.melee ? 4.5 : 9));
     this.swap = Math.max(0, this.swap - dt * 4);
     this.flashT = Math.max(0, this.flashT - dt);
     this.flash.visible = this.flashT > 0;
@@ -63,7 +64,7 @@ export class ViewModel {
     let px = pose.p[0] + bobX, py = pose.p[1] + bobY, pz = pose.p[2];
     let rx = pose.r[0], ry = pose.r[1], rz = pose.r[2];
 
-    if (w.id === 'knife') {
+    if (w.melee) {
       const s = Math.sin(this.kick * Math.PI);           // coup de couteau : 0 -> 1 -> 0
       rx += -this.kick * 1.4; ry += this.kick * 0.9; px -= this.kick * 0.1; pz -= s * 0.1;
     } else {

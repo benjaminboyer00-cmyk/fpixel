@@ -1,12 +1,13 @@
 // Scène 3D : ciel, lumières, sol et boîtes de la carte, le tout en textures "pixel" procédurales.
 import * as THREE from 'three';
-import { BOXES, HALF } from '../shared/map.js';
 
 const COLORS = {
   wall: '#7d8a99', crate: '#c98a45', crateDark: '#8f5d30', platform: '#6c7d92',
   stairs: '#8b98a9', low: '#9aa56b', pillar: '#b9bdc6', stone: '#8b8f96',
+  // village
+  brick: '#a5583f', brickDark: '#7d4130', roof: '#5d4a3e', wood: '#8a6a45', plaster: '#d9cfb8',
+  fence: '#a58b62', bush: '#3f7a3b', concrete: '#9a9da3', metal: '#66707c', road: '#6f6f72',
 };
-const SKY = '#9ec9f0';
 
 function hexToRgb(hex) {
   const n = parseInt(hex.slice(1), 16);
@@ -52,33 +53,41 @@ function boxGeometry(w, h, d, tile = 2) {
 }
 
 export function createWorld(scene) {
-  scene.background = new THREE.Color(SKY);
-  scene.fog = new THREE.Fog(SKY, 30, 95);
-
   scene.add(new THREE.HemisphereLight(0xeaf4ff, 0x556644, 1.15));
   const sun = new THREE.DirectionalLight(0xffffff, 1.6);
   sun.position.set(0.6, 1, 0.4);
   scene.add(sun);
 
-  // Sol
-  const floorTex = pixelTexture('#5d7f4a', 8, 0.08, 0.12);
-  floorTex.repeat.set((HALF * 2) / 4, (HALF * 2) / 4);
-  const floor = new THREE.Mesh(
-    new THREE.PlaneGeometry(HALF * 2, HALF * 2),
-    new THREE.MeshLambertMaterial({ map: floorTex }),
-  );
-  floor.rotation.x = -Math.PI / 2;
-  scene.add(floor);
-
-  // Boîtes de la carte
   const mats = {};
   for (const [k, hex] of Object.entries(COLORS)) mats[k] = new THREE.MeshLambertMaterial({ map: pixelTexture(hex) });
-  const group = new THREE.Group();
-  for (const b of BOXES) {
-    const w = b.x1 - b.x0, h = b.y1 - b.y0, d = b.z1 - b.z0;
-    const m = new THREE.Mesh(boxGeometry(w, h, d), mats[b.c] || mats.wall);
-    m.position.set((b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2, (b.z0 + b.z1) / 2);
-    group.add(m);
+
+  let current = null;
+  // Construit (ou reconstruit) le décor d'une carte : ciel, brouillard, sol et boîtes
+  function load(map) {
+    if (current) {
+      scene.remove(current);
+      current.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
+      current.userData.floorMat?.map?.dispose();
+    }
+    scene.background = new THREE.Color(map.sky);
+    scene.fog = new THREE.Fog(map.sky, map.fog[0], map.fog[1]);
+
+    const group = new THREE.Group();
+    const floorTex = pixelTexture(map.floor, 8, 0.08, 0.12);
+    floorTex.repeat.set((map.half * 2) / 4, (map.half * 2) / 4);
+    const floorMat = new THREE.MeshLambertMaterial({ map: floorTex });
+    group.userData.floorMat = floorMat;
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(map.half * 2, map.half * 2), floorMat);
+    floor.rotation.x = -Math.PI / 2;
+    group.add(floor);
+    for (const b of map.boxes) {
+      const w = b.x1 - b.x0, h = b.y1 - b.y0, d = b.z1 - b.z0;
+      const m = new THREE.Mesh(boxGeometry(w, h, d), mats[b.c] || mats.wall);
+      m.position.set((b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2, (b.z0 + b.z1) / 2);
+      group.add(m);
+    }
+    scene.add(group);
+    current = group;
   }
-  scene.add(group);
+  return { load };
 }

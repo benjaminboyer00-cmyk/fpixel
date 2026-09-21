@@ -6,6 +6,8 @@ import { Game } from './game.js';
 import { sfx } from './audio.js';
 import { loadSettings, saveSettings, isTouch, SERVER_HOST } from './config.js';
 import { MODES } from '../shared/config.js';
+import { MAPS } from '../shared/map.js';
+import { mountClassPicker } from './classes-ui.js';
 
 const $ = (id) => document.getElementById(id);
 const settings = loadSettings();
@@ -35,6 +37,7 @@ function joinMsg() {
   return {
     t: 'join', name: settings.name, mode: settings.mode, room: settings.room.trim(),
     bots: settings.bots ? (settings.fill || 1) : 0, diff: settings.diff, limit: settings.limit, token,
+    map: settings.map, cls: settings.cls, loadout: settings.cls === 'custom' ? settings.custom : undefined,
   };
 }
 
@@ -46,10 +49,27 @@ if (!MODES[settings.mode]) settings.mode = 'ffa';
 function selectMode(m) {
   settings.mode = m;
   document.querySelectorAll('.mode').forEach((b) => b.classList.toggle('sel', b.dataset.mode === m));
+  $('f-class').classList.toggle('off', m === 'gun'); // Gun Game : les armes sont imposées par le niveau
   saveSettings(settings);
 }
 document.querySelectorAll('.mode').forEach((b) => b.addEventListener('click', () => selectMode(b.dataset.mode)));
 selectMode(settings.mode);
+
+// carte + classe
+for (const m of Object.values(MAPS)) $('map').append(Object.assign(document.createElement('option'), { value: m.id, textContent: m.name }));
+if (!MAPS[settings.map]) settings.map = 'arena';
+$('map').value = settings.map;
+const showMapDesc = () => { $('map-desc').textContent = MAPS[settings.map].desc; };
+showMapDesc();
+$('map').addEventListener('change', () => { settings.map = $('map').value; showMapDesc(); saveSettings(settings); });
+mountClassPicker($('cls-picker'), settings, { save: () => saveSettings(settings) });
+// en partie (pause) : changer de classe, effectif à la prochaine réapparition
+function mountPausePicker() {
+  mountClassPicker($('pause-cls'), settings, {
+    save: () => saveSettings(settings),
+    onChange: () => net.send({ t: 'class', cls: settings.cls, loadout: settings.cls === 'custom' ? settings.custom : undefined }),
+  });
+}
 
 $('bots').checked = settings.bots !== false;
 $('bots').addEventListener('change', () => { settings.bots = $('bots').checked; saveSettings(settings); });
@@ -197,6 +217,8 @@ function onWelcome(m) {
 
 // ---------------------------------------------------------------- pause ----
 function showPause(first = false) {
+  $('pause-class').classList.toggle('hidden', game.mode === 'gun');
+  mountPausePicker();
   $('pause').querySelector('h2').textContent = first ? 'PRÊT ?' : 'PAUSE';
   $('resume').textContent = first ? 'Jouer' : 'Reprendre';
   $('pause').classList.remove('hidden');

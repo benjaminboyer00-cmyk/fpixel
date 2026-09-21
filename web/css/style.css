@@ -49,6 +49,20 @@ input[type="text"]:focus { border-color: var(--accent); }
 .mode:hover { border-color: #46566b; }
 .mode.sel { border-color: var(--accent); background: #211c0d; box-shadow: inset 0 0 0 1px var(--accent); }
 
+.f-loadout { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 4px; }
+.f-loadout select, .f-class select { display: block; width: 100%; margin-top: 5px; }
+.f-class.off { opacity: .45; pointer-events: none; }
+.f-class.off #cls-picker::after { content: 'Gun Game : armes imposées'; display: block; font-size: 11px; text-transform: none; letter-spacing: 0; margin-top: 4px; }
+.cls-desc { margin-top: 4px; font-size: 11px; text-transform: none; letter-spacing: 0; color: var(--dim); min-height: 1.3em; }
+.cls-custom { margin-top: 6px; display: grid; gap: 2px; max-height: 190px; overflow: auto; padding: 6px 8px; background: #0e1218; border: 2px solid var(--line); text-transform: none; letter-spacing: 0; }
+.cls-custom.hidden { display: none; }
+.cls-w { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text); cursor: pointer; }
+.cls-w input { accent-color: var(--accent); }
+.cls-w small { margin-left: auto; color: var(--dim); }
+.cls-budget { margin-top: 4px; font-size: 12px; color: var(--accent); }
+.cls-budget.bad { color: #e5484d; }
+#pause-class { text-align: left; }
+#pause-class.hidden { display: none; }
 .check { display: flex; align-items: center; gap: 8px; margin: 10px 0 0; font-size: 13px; color: var(--text); cursor: pointer; }
 .check input { width: 18px; height: 18px; accent-color: var(--accent); }
 select {
@@ -188,6 +202,8 @@ body.touch #ammo { font-size: 22px; }
   .logo { font-size: 30px; letter-spacing: 4px; grid-column: 1 / -1; }
   .tagline { display: none; }
   .modes, .status, .help { grid-column: 1 / -1; }
+  .f-loadout { grid-column: 1 / -1; order: 3; margin: 0; gap: 8px; }
+  .cls-desc { display: none; }
   .modes { grid-template-columns: repeat(3, 1fr); margin: 4px 0; gap: 6px; }
   .mode { padding: 6px 8px; grid-template-columns: 1fr; }
   .mode b { font-size: 13px; }

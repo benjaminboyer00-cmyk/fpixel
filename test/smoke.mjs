@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import WebSocket from 'ws';
-import { WEAPONS, GUN_ORDER, KNIFE } from '../web/shared/config.js';
+import { WEAPONS, GUN_ORDER, KNIFE, W, CLASSES, CUSTOM_BUDGET, weaponCost, resolveClass } from '../web/shared/config.js';
 import { newBotAI } from '../server/bots.js';
 
 const PORT = 7861;
@@ -272,6 +272,172 @@ async function main() {
     check('« leave » : retiré immédiatement (pas de délai de grâce)', !!left3 && Date.now() - t0 < 700, `${Date.now() - t0} ms`);
     R3.ws.close(); R2.ws.close();
     await sleep(300);
+  }
+
+  // ---------- CLASSES ----------
+  console.log('\n[classes]');
+  {
+    check('classes prédéfinies : toutes dans le budget de 10 points', Object.values(CLASSES).every((c) => weaponCost(c.weapons) <= CUSTOM_BUDGET), Object.values(CLASSES).map((c) => `${c.id}:${weaponCost(c.weapons)}`).join(' '));
+    check('classe perso valide acceptée', resolveClass('custom', [W.ROCKET, W.MINIGUN, W.KNIFE]).id === 'custom');
+    check('classe perso trop chère refusée (retour à Classique)', resolveClass('custom', [W.ROCKET, W.MINIGUN, W.EXCALIBUR]).id === 'classic');
+    check('classe perso : armes en double / inconnues nettoyées', resolveClass('custom', [W.AR, W.AR, 99, W.KNIFE]).weapons.join() === `${W.AR},${W.KNIFE}`);
+
+    const mk = async (name, cls, loadout, room = 'cls') => {
+      const b = new Bot(name); await b.connect(); b.join('ffa', room, 0, { cls, loadout });
+      const w = await b.waitFor('welcome'); b.id = w.id; b.welcome = w;
+      b.spawn = await b.waitFor('spawn'); return b;
+    };
+    const H = await mk('Lourd', 'heavy');
+    check('classe Lourd : 150 PV et ses 4 armes à l\'apparition', H.spawn.maxHp === 150 && H.spawn.hp === 150 && H.spawn.loadout.join() === CLASSES.heavy.weapons.join() && H.spawn.speed === 0.88, JSON.stringify(H.spawn));
+    const S = await mk('Eclaireur', 'scout');
+    check('classe Éclaireur : 80 PV, plus rapide', S.spawn.maxHp === 80 && S.spawn.speed > 1);
+    const C = await mk('Triche', 'custom', [W.ROCKET, W.MINIGUN, W.EXCALIBUR, W.PORTAL, W.TESLA]);
+    check('classe perso trop chère côté serveur : Classique', C.spawn.loadout.length === 5 && C.spawn.maxHp === 100);
+    await sleep(500);
+    // une arme qui n'est pas dans la classe ne tire pas : l'Éclaireur n'a pas de fusil d'assaut
+    S.pos(-15, 0, -25, Math.PI, W.SHOTGUN); H.pos(-15, 0, -22, Math.PI, W.SHOTGUN);
+    await sleep(300);
+    const nShots = H.count('shot');
+    S.fire(W.AR, [-15, 1.6, -25], [0, 0, 1]);
+    await sleep(300);
+    check('arme hors de la classe : le tir est ignoré', H.count('shot') === nShots && !S.has('hit'));
+    // changement de classe : effectif à la réapparition
+    S.send({ t: 'class', cls: 'knight' });
+    const ok = await S.waitFor('classok', null, 2000).catch(() => null);
+    check('changement de classe confirmé par le serveur', ok && ok.name === 'Chevalier');
+    [H, S, C].forEach((b) => b.ws.close());
+    await sleep(300);
+  }
+
+  // ---------- ARMES SPÉCIALES ----------
+  console.log('\n[armes spéciales]');
+  {
+    const mk = async (name, loadout, x, z, room = 'wp') => {
+      const b = new Bot(name); await b.connect(); b.join('ffa', room, 0, { cls: 'custom', loadout });
+      const w = await b.waitFor('welcome'); b.id = w.id; await b.waitFor('spawn');
+      b.at = (px, pz, yaw = Math.PI, wi = 0) => b.pos(px, 0, pz, yaw, wi);
+      return b;
+    };
+    const closeAll = async (...bs) => { bs.forEach((b) => b.ws.close()); await sleep(250); };
+    const dmgOf = (b) => b.log.filter((m) => m.t === 'dmg').at(-1);
+
+    // --- lance-roquettes : dégâts directs + éclaboussure + recul ---
+    {
+      const A = await mk('Rk-A', [W.ROCKET]), B = await mk('Rk-B', [W.KNIFE]), C = await mk('Rk-C', [W.KNIFE]);
+      await sleep(450);
+      A.at(-15, -25, Math.PI, W.ROCKET); B.at(-15, -19, Math.PI); C.at(-15, -16.5, Math.PI); // C à 2,5 m derrière B
+      await sleep(300);
+      A.fire(W.ROCKET, [-15, 1.6, -25], [0, -0.05, 1]);
+      const boom = await A.waitFor('boom', null, 3000).catch(() => null);
+      check('roquette : explosion diffusée à tous avec son rayon', !!boom && boom.r === 4.5 && boom.w === W.ROCKET, JSON.stringify(boom));
+      await sleep(300);
+      check('roquette : la cible touchée de plein fouet est tuée', B.has('kill', (m) => m.v === B.id));
+      const dc = dmgOf(C);
+      check('roquette : éclaboussure sur le voisin (dégâts réduits, pas mortels)', !!dc && dc.hp < 100 && dc.hp > 0, JSON.stringify(dc));
+      const pc = C.log.find((m) => m.t === 'push');
+      check('roquette : le voisin est repoussé (message push vers le haut)', !!pc && pc.v[1] > 0 && Math.hypot(pc.v[0], pc.v[2]) > 1, JSON.stringify(pc));
+      await closeAll(A, B, C);
+    }
+    // --- rocket jump : tirer à ses pieds blesse un peu (x0.5) et propulse ---
+    {
+      const A = await mk('Rj-A', [W.ROCKET]);
+      await sleep(450);
+      A.at(-15, -20, Math.PI, W.ROCKET); await sleep(300);
+      A.fire(W.ROCKET, [-15, 1.6, -20], [0, -1, 0]);
+      const d = await A.waitFor('dmg', null, 3000).catch(() => null);
+      check('rocket jump : dégâts sur soi réduits de moitié', !!d && d.a === A.id && d.hp > 30 && d.hp < 100, JSON.stringify(d));
+      const push = await A.waitFor('push', null, 1000).catch(() => null);
+      check('rocket jump : propulsé vers le haut', !!push && push.v[1] > 5, JSON.stringify(push));
+      await closeAll(A);
+    }
+    // --- lance-grenades ---
+    {
+      const A = await mk('Gr-A', [W.GRENADE]), B = await mk('Gr-B', [W.KNIFE]);
+      await sleep(450);
+      A.at(-15, -25, Math.PI, W.GRENADE); B.at(-15, -21, Math.PI); await sleep(300);
+      A.fire(W.GRENADE, [-15, 1.6, -25], [0, 0, 1]);
+      const boom = await B.waitFor('boom', null, 3000).catch(() => null);
+      check('grenade : explose au contact (rayon 3,8)', !!boom && boom.r === 3.8, JSON.stringify(boom));
+      await sleep(200);
+      check('grenade : blesse la cible', !!dmgOf(B) || B.has('kill'));
+      await closeAll(A, B);
+    }
+    // --- Excalibur : touche tous les ennemis dans l'arc, pas ceux derrière ---
+    {
+      const A = await mk('Ex-A', [W.EXCALIBUR]), B = await mk('Ex-B', [W.KNIFE]), C = await mk('Ex-C', [W.KNIFE]), D = await mk('Ex-D', [W.KNIFE]);
+      await sleep(450);
+      A.at(-15, -25, Math.PI, W.EXCALIBUR); B.at(-15, -22.5, Math.PI); C.at(-14, -22.5, Math.PI); D.at(-15, -27, Math.PI); // D derrière A
+      await sleep(300);
+      A.fire(W.EXCALIBUR, [-15, 1.6, -25], [0, 0, 1]);
+      await sleep(400);
+      check('Excalibur : deux ennemis dans l\'arc touchés en un coup', dmgOf(B)?.hp === 35 && dmgOf(C)?.hp === 35, `${dmgOf(B)?.hp} / ${dmgOf(C)?.hp}`);
+      check('Excalibur : un ennemi derrière n\'est pas touché', !dmgOf(D));
+      await closeAll(A, B, C, D);
+    }
+    // --- grappin : attire l'ennemi ; sur un mur, nous attire ---
+    {
+      const A = await mk('Gp-A', [W.GRAPPLE]), B = await mk('Gp-B', [W.KNIFE]);
+      await sleep(450);
+      A.at(-15, -25, Math.PI, W.GRAPPLE); B.at(-15, -15, Math.PI); await sleep(300);
+      A.fire(W.GRAPPLE, [-15, 1.6, -25], [0, 0, 1]);
+      const pull = await B.waitFor('pull', null, 2000).catch(() => null);
+      check('grappin : l\'ennemi touché reçoit une attraction vers le tireur', !!pull && Math.abs(pull.z - -25) < 3 && pull.sp === 21, JSON.stringify(pull));
+      check('grappin : petits dégâts', dmgOf(B)?.hp === 92, JSON.stringify(dmgOf(B)));
+      await sleep(3700); // recharge
+      B.at(20, 20, Math.PI);
+      A.at(-15, -25, 0, W.GRAPPLE); await sleep(200); // A regarde vers -z : le mur d'enceinte
+      A.fire(W.GRAPPLE, [-15, 1.6, -25], [0, 0, -1]);
+      const self = await A.waitFor('pull', null, 2000).catch(() => null);
+      check('grappin sur un mur : c\'est le tireur qui est attiré', !!self && self.z < -25, JSON.stringify(self));
+      await closeAll(A, B);
+    }
+    // --- pistolet portail ---
+    {
+      const A = await mk('Pt-A', [W.PORTAL]), B = await mk('Pt-B', [W.KNIFE]);
+      await sleep(450);
+      A.at(0, -20, 0, W.PORTAL); await sleep(300);
+      A.fire(W.PORTAL, [0, 1.6, -20], [0, 0, -1]);
+      const p0 = await B.waitFor('portal', (m) => m.i === 0, 2000).catch(() => null);
+      check('portail bleu posé sur le mur d\'enceinte et diffusé', !!p0 && p0.nz === 1 && Math.abs(p0.z - -29.97) < 0.05 && p0.o === A.id, JSON.stringify(p0));
+      await sleep(450);
+      A.send({ t: 'fire', w: W.PORTAL, alt: 1, ox: 0, oy: 1.6, oz: -20, dx: 0.3, dy: 0, dz: -1, seed: 2, rt: Date.now() });
+      const p1 = await B.waitFor('portal', (m) => m.i === 1, 2000).catch(() => null);
+      check('portail orange (tir secondaire) posé', !!p1 && p1.i === 1, JSON.stringify(p1));
+      await sleep(450);
+      const n = B.count('portal');
+      A.at(12, 3.6, Math.PI / 2, W.PORTAL); await sleep(200);
+      A.fire(W.PORTAL, [12, 1.0, 3.6], [0, 0, -1]); // sur le muret bas (1 m) : trop petit
+      await sleep(300);
+      check('pas de portail sur une surface trop petite (muret bas)', B.count('portal') === n);
+      const C = new Bot('Pt-late'); await C.connect(); C.join('ffa', 'wp', 0);
+      const w = await C.waitFor('welcome');
+      check('un joueur qui arrive voit les portails déjà posés', w.portals.length === 2, JSON.stringify(w.portals));
+      A.ws.close();
+      const off = await B.waitFor('portalOff', null, 1500).catch(() => null);
+      check('les portails disparaissent quand leur propriétaire part', !!off && off.o === A.id);
+      await closeAll(B, C);
+    }
+    // --- fusil à foudre : saute d'ennemi en ennemi ---
+    {
+      const A = await mk('Ts-A', [W.TESLA]), B = await mk('Ts-B', [W.KNIFE]), C = await mk('Ts-C', [W.KNIFE]), D = await mk('Ts-D', [W.KNIFE]);
+      await sleep(450);
+      A.at(-15, -25, Math.PI, W.TESLA); B.at(-15, -19, Math.PI); C.at(-12, -19, Math.PI); D.at(-9, -19, Math.PI);
+      await sleep(300);
+      A.fire(W.TESLA, [-15, 1.6, -25], [0, 0, 1]);
+      await sleep(400);
+      check('foudre : la chaîne touche 3 ennemis avec des dégâts décroissants', dmgOf(B)?.hp === 78 && dmgOf(C)?.hp === 85 && dmgOf(D)?.hp === 90, `${dmgOf(B)?.hp} ${dmgOf(C)?.hp} ${dmgOf(D)?.hp}`);
+      await closeAll(A, B, C, D);
+    }
+    // --- minigun : cadence très élevée ---
+    {
+      const A = await mk('Mg-A', [W.MINIGUN]), B = await mk('Mg-B', [W.KNIFE]);
+      await sleep(450);
+      A.at(-15, -25, Math.PI, W.MINIGUN); B.at(-15, -21, Math.PI); await sleep(300);
+      for (let i = 0; i < 24; i++) { A.fire(W.MINIGUN, [-15, 1.0, -25], [0, 0, 1], { seed: i + 1 }); await sleep(46); }
+      await sleep(300);
+      check('minigun : plus de 15 balles/s, la cible est tuée', B.has('kill', (m) => m.v === B.id));
+      await closeAll(A, B);
+    }
   }
 
   // ---------- GUN GAME ----------
