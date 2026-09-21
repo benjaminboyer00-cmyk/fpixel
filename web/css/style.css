@@ -257,3 +257,6 @@ body.touch #ammo { font-size: 22px; }
 #t-nade { right: calc(max(24px, env(safe-area-inset-right)) + 12px); bottom: calc(max(24px, env(safe-area-inset-bottom)) + 184px); width: 50px; height: 50px; font-size: 15px; }
 #mystats { margin: 6px 0 0; line-height: 1.6; }
 #scoreboard table { font-size: 13px; }
+#charge { position: absolute; left: 50%; bottom: 128px; transform: translateX(-50%); width: min(260px, 50vw); height: 12px; background: rgba(0, 0, 0, .6); border: 2px solid #b455ff; }
+#charge i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #6b3fa0, #e0a8ff); }
+#charge.hidden { display: none; }

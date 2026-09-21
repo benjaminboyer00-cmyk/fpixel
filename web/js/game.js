@@ -14,6 +14,7 @@ import { playerColor } from './hud.js';
 import { sfx } from './audio.js';
 import { isTouch, saveSettings } from './config.js';
 import { Minimap } from './minimap.js';
+import { stepPlane, PLANE } from '../shared/plane.js';
 
 const MAX_TRACER = 90;
 
@@ -126,7 +127,7 @@ export class Game {
     const loadout = this.gun ? [GUN_ORDER[level], KNIFE] : resolveClass(s0.cls, s0.custom).weapons.slice();
     this.me = {
       x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, onGround: true, yaw: 0, pitch: 0,
-      level, loadout, maxHp: MAX_HP, speedMul: 1, nades: 0, nadeReady: 0, pull: null, portalUntil: 0, stunUntil: 0, altUntil: {}, jumpPrev: false,
+      level, loadout, maxHp: MAX_HP, speedMul: 1, nades: 0, nadeReady: 0, charging: false, chargeAt: 0, flight: null, lastPc: 0, preYaw: 0, prePitch: 0, pull: null, portalUntil: 0, stunUntil: 0, altUntil: {}, jumpPrev: false,
       hp: MAX_HP, alive: false, spawned: false, weapon: loadout[0], ammo: WEAPONS.map((w) => w.mag),
       reloadUntil: 0, nextFire: 0, switchUntil: 0, scoped: false, scopeToggle: false,
       respawnAt: 0, killer: null, deadT: 0, prot: 0, lastSend: 0,
@@ -276,6 +277,38 @@ export class Game {
     });
     n.on('pbounce', (m) => this.fx.bounceProj(m.id, m.o, m.v));
     n.on('nades', (m) => { if (this.me) this.me.nades = m.n; });
+    n.on('charge', (m) => { const p = this.players.get(m.id); if (p) p.charging = !!m.on; });   // canon à orbe : lueur pendant la charge
+    n.on('planeOn', (m) => { // on prend les commandes de l'avion en papier
+      const me = this.me;
+      if (!me) return;
+      me.flight = { x: m.x, y: m.y, z: m.z, yaw: m.yaw, pitch: m.pitch, born: performance.now() };
+      me.preYaw = me.yaw; me.prePitch = me.pitch;           // la souris sert à diriger l'avion ; on rendra la visée à la fin du vol
+      me.yaw = m.yaw; me.pitch = m.pitch; me.lastPc = 0;
+      me.scoped = false; me.scopeToggle = false;
+      sfx.play('plane');
+      this.hud.hint('AVION : souris = diriger · tir = abandonner · tête = mort, corps = 60', 5000);
+    });
+    n.on('plane', (m) => {
+      if (m.id !== this.myId) return this.fx.setPlane(m.id, m.x, m.y, m.z, m.yaw, m.pitch);
+      const f = this.me?.flight;
+      if (!f) return;
+      // le message du serveur a ~1/2 ping de retard : on le prolonge dans son cap, puis on rapproche doucement notre avion prédit
+      const lag = this.net.rtt / 2000, c = Math.cos(m.pitch), sp = PLANE.speed * lag;
+      const ex = m.x - Math.sin(m.yaw) * c * sp, ey = m.y + Math.sin(m.pitch) * sp, ez = m.z - Math.cos(m.yaw) * c * sp;
+      const err = Math.hypot(ex - f.x, ey - f.y, ez - f.z);
+      const k = err > 5 ? 1 : 0.12;
+      f.x += (ex - f.x) * k; f.y += (ey - f.y) * k; f.z += (ez - f.z) * k;
+    });
+    n.on('planeOff', (m) => {
+      this.fx.removePlane(m.id);
+      this.fx.burst(m.x, m.y, m.z, '#f4f1e8', 12, 3.5, 0.7);
+      const me = this.me;
+      if (m.id === this.myId && me?.flight) {
+        me.flight = null;
+        me.yaw = me.preYaw; me.pitch = me.prePitch;
+        this.hud.hint(m.why === 'hit' ? 'Touché !' : m.why === 'wall' || m.why === 'ground' ? 'Avion écrasé' : 'Vol terminé', 1800);
+      }
+    });
     n.on('boom', (m) => {
       this.fx.removeProj(m.id);
       this.fx.explosion(m.x, m.y, m.z, m.r);
@@ -371,6 +404,7 @@ export class Game {
     me.hp = m.hp; me.alive = true; me.spawned = true; me.deadT = 0; me.killer = null;
     me.ammo = WEAPONS.map((w) => w.mag);
     me.reloadUntil = 0; me.nextFire = 0; me.scopeToggle = false; me.pull = null; me.nades = m.nades ?? 0;
+    me.charging = false; me.flight = null;
     if (m.loadout) {
       me.loadout = m.loadout.slice();
       me.maxHp = m.maxHp ?? MAX_HP;
@@ -404,6 +438,7 @@ export class Game {
       me.alive = false; me.deadT = 0; me.hp = 0; me.killer = m.a;
       me.respawnAt = performance.now() + RESPAWN_MS;
       me.scoped = false; me.scopeToggle = false;
+      me.charging = false; me.flight = null;
       this.input.reset();
     } else {
       const v = this.players.get(m.v);
@@ -501,7 +536,7 @@ export class Game {
       }
       const cyc = inp.takeCycle();
       if (cyc) want = this._cycleWeapon(Math.sign(cyc));
-      if (want !== undefined && want !== me.weapon && WEAPONS[want]) this._switchTo(want, now);
+      if (want !== undefined && want !== me.weapon && WEAPONS[want] && !me.flight) this._switchTo(want, now);
 
       // --- rechargement ---
       if (inp.takeReload()) this._startReload(now);
@@ -518,7 +553,10 @@ export class Game {
       const pressed = inp.takeFirePress(now);
       let firing = inp.fireHeld || pressed;
       if (!firing && s.autoFire && w.kind !== 'portal' && this._enemyInCrosshair(w, me)) firing = true;
-      if (w.kind === 'portal') {
+      if (me.flight) {
+        if (pressed) this.net.send({ t: 'pcancel' });           // tirer pendant le vol : on abandonne l'avion
+        inp.takeAlt();
+      } else if (w.kind === 'portal') {
         // pistolet portail : tir = portail bleu, tir secondaire (clic droit / E / ZOOM) = portail orange
         const alt = inp.takeAlt();
         if (firing || alt) this._tryFire(now, alt);
@@ -527,6 +565,9 @@ export class Game {
         const alt = inp.takeAlt();
         if (alt) this._tryFire(now, true);
         else if (firing) this._tryFire(now);
+      } else if (w.charge) {
+        inp.takeAlt();
+        this._updateCharge(now, w, firing);
       } else {
         inp.takeAlt();
         if (firing) this._tryFire(now);
@@ -538,7 +579,7 @@ export class Game {
     // --- déplacement ---
     let wx = 0, wz = 0;
     const active = me.alive && inp.active;
-    if (active) {
+    if (active && !me.flight) {
       const mx = inp.moveX, my = inp.moveY;
       const l = Math.hypot(mx, my);
       if (l > 0) {
@@ -549,10 +590,10 @@ export class Game {
         wz = fz * ny + rz * nx;
       }
     }
-    let speed = WALK_SPEED * w.speed * (me.scoped ? 0.5 : 1) * me.speedMul;
+    let speed = WALK_SPEED * w.speed * (me.scoped ? 0.5 : 1) * me.speedMul * (me.charging ? 0.35 : 1);
     const stunned = now < me.stunUntil;
     if (stunned) { wx = wz = 0; me.vx = me.vz = 0; me.pull = null; }
-    const jumpNow = active && inp.jumpHeld && !stunned;
+    const jumpNow = active && inp.jumpHeld && !stunned && !me.flight;
     if (me.pull && jumpNow && !me.jumpPrev) { me.pull = null; me.vy = Math.max(me.vy, JUMP_SPEED); }   // saut = on se décroche en gardant son élan
     me.jumpPrev = jumpNow;
     if (me.pull) { // grappin : on est tiré vers le point d'accroche
@@ -569,6 +610,14 @@ export class Game {
         }
       }
     }
+    if (me.flight) { // avion en papier : la souris (yaw/pitch) donne le cap voulu, on simule le vol localement
+      stepPlane(me.flight, dt, me.yaw, me.pitch);
+      if (now - me.lastPc >= TICK_MS) {
+        me.lastPc = now;
+        const r = (v) => Math.round(v * 1000) / 1000;
+        this.net.send({ t: 'pc', yaw: r(me.yaw), pitch: r(me.pitch) });
+      }
+    }
     if (me.spawned) {
       stepPlayer(me, dt, wx, wz, speed, jumpNow && !me.pull, this.map);
       if (me.y < -10) { me.y = 3; me.vy = 0; }
@@ -579,7 +628,8 @@ export class Game {
       if (now - me.lastSend >= TICK_MS) {
         me.lastSend = now;
         const r = (v) => Math.round(v * 1000) / 1000;
-        this.net.send({ t: 'in', x: r(me.x), y: r(me.y), z: r(me.z), yaw: r(me.yaw), pitch: r(me.pitch), w: me.weapon });
+        const fl = me.flight; // pendant le vol, le corps garde sa direction d'avant
+        this.net.send({ t: 'in', x: r(me.x), y: r(me.y), z: r(me.z), yaw: r(fl ? me.preYaw : me.yaw), pitch: r(fl ? me.prePitch : me.pitch), w: me.weapon });
       }
     }
     me.speed2d = Math.hypot(me.vx, me.vz);
@@ -693,6 +743,7 @@ export class Game {
 
   _switchTo(i, now) {
     const me = this.me;
+    if (me.charging) { me.charging = false; this.net.send({ t: 'charge', on: 0 }); }
     me.weapon = i;
     me.reloadUntil = 0;
     me.scoped = false; me.scopeToggle = false;
@@ -700,10 +751,28 @@ export class Game {
     this.viewmodel.setWeapon(i);
   }
 
+  // Canon à orbe : un appui lance la charge (1,8 s, déplacement ralenti), le tir part tout seul quand elle est pleine
+  _updateCharge(now, w, firing) {
+    const me = this.me;
+    if (!me.charging) {
+      if (!firing) return;
+      if (me.ammo[me.weapon] <= 0) return this._tryFire(now);          // vide : clic à vide + rechargement
+      if (now < me.nextFire || now < me.switchUntil || me.reloadUntil || now < me.stunUntil || this.state === 'ended') return;
+      me.charging = true; me.chargeAt = now;
+      this.net.send({ t: 'charge', on: 1 });
+      sfx.play('charge');
+      return;
+    }
+    if (now - me.chargeAt >= w.charge) {
+      me.charging = false;
+      this._tryFire(now);
+    }
+  }
+
   // Grenade à main (touche G) : lancée en cloche dans la direction du regard, rebondit et explose après 2,4 s
   _throwNade(now) {
     const me = this.me;
-    if (this.gun || this.state === 'ended' || me.nades <= 0 || now < me.nadeReady || now < me.stunUntil) return;
+    if (this.gun || me.flight || this.state === 'ended' || me.nades <= 0 || now < me.nadeReady || now < me.stunUntil) return;
     me.nades--; me.nadeReady = now + 800;
     const [dx, dy, dz] = lookDir(me.yaw, me.pitch);
     const up = dy + 0.22, l = Math.hypot(dx, up, dz);   // un peu vers le haut, comme un vrai lancer
@@ -821,6 +890,8 @@ export class Game {
       p.model.head.rotation.x = clamp(pitch, -1.2, 1.2);
       p.model.setWeapon(WEAPONS[p.weapon]?.id ?? 'ar');
 
+      if (p.charging) this.fx.burst(g.position.x, g.position.y + 1.3, g.position.z, '#c040ff', 1, 1.6, 0.4);
+
       // animation de marche
       const moved = Math.hypot(x - p.lastX, z - p.lastZ) / Math.max(dt, 1e-3);
       p.lastX = x; p.lastZ = z;
@@ -841,6 +912,18 @@ export class Game {
       const k = Math.min(1, me.deadT * 2.5);
       eye = me.y + EYE_HEIGHT - (EYE_HEIGHT - 0.35) * k;
       roll = 0.9 * k;
+    }
+    const fl = me.flight;
+    if (fl) { // vue depuis le nez de l'avion, qui s'incline dans les virages
+      let d = (me.yaw - fl.yaw) % (Math.PI * 2);
+      if (d > Math.PI) d -= Math.PI * 2; else if (d < -Math.PI) d += Math.PI * 2;
+      cam.position.set(fl.x, fl.y, fl.z);
+      cam.rotation.set(fl.pitch, fl.yaw, clamp(d * 0.5, -0.5, 0.5));
+      this._applyFov(false);
+      document.getElementById('scope').classList.add('hidden');
+      document.body.classList.remove('scoped');
+      this.viewmodel.update(dt, { speed: 0, onGround: true, reloadProgress: null, visible: false });
+      return;
     }
     cam.position.set(me.x, eye, me.z);
     let sx = 0, sy = 0;
@@ -889,8 +972,12 @@ export class Game {
       special = left > 0 ? `${cw.alt.name} : recharge ${Math.ceil(left / 1000)} s` : `${cw.alt.name} : PRÊT (clic droit / E)`;
     } else if (cw.kind === 'portal') special = 'Clic : portail bleu · clic droit / E : portail orange';
     else if (cw.kind === 'grapple') special = 'Saut pendant le grappin : on se décroche en gardant l\'élan';
+    else if (cw.charge) special = 'Un appui : charge 1,8 s (tu ralentis), puis l\'orbe traverse les ennemis';
+    else if (cw.kind === 'plane') special = 'Un appui : lancer · souris : diriger · tir : abandonner';
     else if (cw.streak !== undefined) special = `Arme de série · un seul chargeur${cw.kind === 'nuke' ? ' · 1 missile' : ''}`;
+    if (me.flight) special = `AVION EN PAPIER · ${Math.max(0, Math.ceil(PLANE.life - (now - me.flight.born) / 1000))} s · tir : abandonner`;
     this.hud.setSpecial(special);
+    this.hud.setCharge(me.charging ? clamp((now - me.chargeAt) / cw.charge, 0, 1) : null);
     if (this.nukeAt) this.hud.nukeCount(Math.max(0, (this.nukeAt - now) / 1000));
     if (this.gas) this.hud.gas(this.gas.owner === this.myId ? 'mask' : 'toxic', Math.max(0, (this.gas.until - now) / 1000));
 

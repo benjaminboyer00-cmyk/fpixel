@@ -1,5 +1,6 @@
 // Effets : traînées de balles et petits cubes qui giclent (impacts, sang pixelisé).
 import * as THREE from 'three';
+import { buildPlane } from './models.js';
 
 const tracerGeo = new THREE.BoxGeometry(0.035, 0.035, 1);
 const partGeo = new THREE.BoxGeometry(0.1, 0.1, 0.1);
@@ -39,6 +40,7 @@ export class Fx {
       this.waves.push(m);
     }
     this.wi = 0;
+    this.planes = new Map();  // avions en papier des autres joueurs
     this.projs = new Map();  // roquettes / grenades en vol
     this.portals = new Map(); // "propriétaire:i" -> mesh
     this.fi = 0;
@@ -85,13 +87,15 @@ export class Fx {
   }
 
   addProj(id, kind, x, y, z, vx, vy, vz, g, bounce = 0) {
-    const grenade = kind === 'grenade' || kind === 'frag';
+    const orb = kind === 'orb';
+    const grenade = kind === 'grenade' || kind === 'frag' || orb;
+    const sz = orb ? 0.75 : grenade ? 0.24 : 0.16;
     const m = new THREE.Mesh(
-      new THREE.BoxGeometry(grenade ? 0.24 : 0.16, grenade ? 0.24 : 0.16, grenade ? 0.24 : 0.5),
-      new THREE.MeshBasicMaterial({ color: grenade ? 0x4d5a3d : 0xd9d9d9, fog: false }));
+      new THREE.BoxGeometry(sz, sz, grenade ? sz : 0.5),
+      new THREE.MeshBasicMaterial({ color: orb ? 0xc040ff : grenade ? 0x4d5a3d : 0xd9d9d9, fog: false }));
     m.position.set(x, y, z);
     this.scene.add(m);
-    this.projs.set(id, { m, vx, vy, vz, g, trail: 0, grenade, bounce });
+    this.projs.set(id, { m, vx, vy, vz, g, trail: 0, grenade, bounce, orb });
   }
 
   // Rebond calculé par le serveur : on recale la position et la vitesse
@@ -100,6 +104,27 @@ export class Fx {
     if (!p) return;
     p.m.position.set(o[0], o[1], o[2]);
     p.vx = v[0]; p.vy = v[1]; p.vz = v[2];
+  }
+
+  // Avion en papier d'un autre joueur : on glisse vers la dernière position reçue
+  setPlane(id, x, y, z, yaw, pitch) {
+    let p = this.planes.get(id);
+    if (!p) {
+      const m = buildPlane();
+      m.position.set(x, y, z);
+      this.scene.add(m);
+      p = { m, tx: x, ty: y, tz: z, yaw, pitch };
+      this.planes.set(id, p);
+    }
+    p.tx = x; p.ty = y; p.tz = z; p.yaw = yaw; p.pitch = pitch;
+  }
+
+  removePlane(id) {
+    const p = this.planes.get(id);
+    if (!p) return;
+    this.scene.remove(p.m);
+    p.m.traverse((o) => { o.geometry?.dispose?.(); });
+    this.planes.delete(id);
   }
 
   removeProj(id) {
@@ -194,7 +219,12 @@ export class Fx {
       }
       if (!p.grenade) p.m.lookAt(p.m.position.x + p.vx, p.m.position.y + p.vy, p.m.position.z + p.vz);
       p.trail -= dt;
-      if (p.trail <= 0) { p.trail = 0.035; this.burst(p.m.position.x, p.m.position.y, p.m.position.z, p.grenade ? '#8a8a8a' : '#ffb04a', 1, 0.6, 0.4); }
+      if (p.trail <= 0) { p.trail = p.orb ? 0.02 : 0.035; this.burst(p.m.position.x, p.m.position.y, p.m.position.z, p.orb ? '#c040ff' : p.grenade ? '#8a8a8a' : '#ffb04a', p.orb ? 2 : 1, p.orb ? 1.4 : 0.6, 0.4); if (p.orb) p.m.rotation.y += 0.4; }
+    }
+    const k = 1 - Math.exp(-dt * 18);
+    for (const p of this.planes.values()) {
+      p.m.position.x += (p.tx - p.m.position.x) * k; p.m.position.y += (p.ty - p.m.position.y) * k; p.m.position.z += (p.tz - p.m.position.z) * k;
+      p.m.rotation.set(p.pitch, p.yaw, 0);
     }
     const pulse = 0.75 + 0.2 * Math.sin(performance.now() / 120);
     for (const g of this.portals.values()) g.userData.inner.material.opacity = pulse;
@@ -217,6 +247,7 @@ export class Fx {
     for (const m of this.flashes) m.visible = false;
     for (const m of this.waves) m.visible = false;
     for (const id of [...this.projs.keys()]) this.removeProj(id);
+    for (const id of [...this.planes.keys()]) this.removePlane(id);
     for (const k of [...this.portals.keys()]) this.removePortal(k);
   }
 }

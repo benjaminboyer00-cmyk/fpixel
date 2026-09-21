@@ -147,6 +147,13 @@ export class Hud {
     this.hintT = setTimeout(() => e.classList.remove('on'), ms);
   }
 
+  // Barre de charge du canon à orbe (0..1, null = masquée)
+  setCharge(f) {
+    const e = $('charge');
+    e.classList.toggle('hidden', f === null);
+    if (f !== null) e.firstElementChild.style.width = `${Math.round(f * 100)}%`;
+  }
+
   // Grenades à main restantes (touche G)
   setNades(n, show = true) {
     this._set('nades', 'nades', show ? n : -1, (e) => { e.textContent = show ? `G · Grenade ${'●'.repeat(n)}${'○'.repeat(Math.max(0, NADE_MAX - n))}` : ''; });

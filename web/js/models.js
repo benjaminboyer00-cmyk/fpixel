@@ -145,6 +145,22 @@ export function buildGun(id) {
       g.add(box(0.05, 0.14, 0.06, '#2a2d33', 0, -0.13, -0.05));
       muzzle = [0, 0.02, -0.92];
       break;
+    case 'orb':
+      g.add(box(0.15, 0.15, 0.85, '#2b2140', 0, 0.02, -0.3));
+      g.add(box(0.2, 0.2, 0.08, '#6b3fa0', 0, 0.02, -0.72));      // anneau de charge
+      g.add(box(0.2, 0.2, 0.08, '#6b3fa0', 0, 0.02, -0.5));
+      g.add(box(0.24, 0.24, 0.24, '#c040ff', 0, 0.02, -0.95));    // l'orbe
+      g.add(box(0.05, 0.14, 0.06, '#2a2d33', 0, -0.13, -0.05));
+      g.add(box(0.13, 0.13, 0.2, '#1a1428', 0, 0.02, 0.2));
+      muzzle = [0, 0.02, -1.1];
+      break;
+    case 'plane':
+      g.add(box(0.05, 0.05, 0.6, '#f4f1e8', 0, 0, -0.3));
+      { const l = box(0.4, 0.02, 0.32, '#ffffff', -0.18, 0.02, -0.22); l.rotation.z = 0.3; g.add(l); }
+      { const r = box(0.4, 0.02, 0.32, '#ffffff', 0.18, 0.02, -0.22); r.rotation.z = -0.3; g.add(r); }
+      g.add(box(0.02, 0.14, 0.18, '#d9d4c4', 0, 0.08, -0.05));
+      muzzle = [0, 0, -0.62];
+      break;
   }
   g.userData.muzzle = new THREE.Vector3(...muzzle);
   return g;
@@ -163,6 +179,8 @@ export const VM_POSE = {
   grapple: { p: [0.2, -0.24, -0.6], r: [0, 0, 0] },
   portal: { p: [0.2, -0.24, -0.6], r: [0, 0, 0] },
   minigun: { p: [0.2, -0.28, -0.55], r: [0, 0, 0] },
+  orb: { p: [0.22, -0.28, -0.55], r: [0, 0, 0] },
+  plane: { p: [0.2, -0.25, -0.55], r: [0.15, 0.2, 0] },
   laser: { p: [0.2, -0.25, -0.6], r: [0, 0, 0] },
   carbine: { p: [0.2, -0.24, -0.62], r: [0, 0, 0] },
   flame: { p: [0.21, -0.26, -0.58], r: [0, 0, 0] },
@@ -216,6 +234,17 @@ export function buildPlayer(color) {
   };
 
   return { group: g, head, legs, setWeapon };
+}
+
+// Avion en papier en vol (vu de l'extérieur) : nez vers -Z
+export function buildPlane() {
+  const g = new THREE.Group();
+  g.add(box(0.06, 0.06, 0.8, '#f4f1e8', 0, 0, 0));
+  const l = box(0.5, 0.02, 0.45, '#ffffff', -0.22, 0.03, 0.08); l.rotation.z = 0.32; g.add(l);
+  const r = box(0.5, 0.02, 0.45, '#ffffff', 0.22, 0.03, 0.08); r.rotation.z = -0.32; g.add(r);
+  g.add(box(0.02, 0.18, 0.22, '#d9d4c4', 0, 0.1, 0.32));
+  g.rotation.order = 'YXZ';
+  return g;
 }
 
 export function makeNameSprite(name, color) {

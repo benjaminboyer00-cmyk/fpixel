@@ -15,6 +15,7 @@ import {
 import { MAPS, mapById } from '../web/shared/map.js';
 import { rayAABB, applySpread, mulberry32, clamp } from '../web/shared/util.js';
 import { BOT_NAMES, newBotAI, botStep, botClass } from './bots.js';
+import { stepPlane, PLANE } from '../web/shared/plane.js';
 
 const STREAKS = process.env.STREAKS ? process.env.STREAKS.split(',').map(Number) : STREAK_AT; // kills d'affilée pour le laser, le lance-flammes, le missile
 
@@ -144,6 +145,7 @@ function createRoom(id, mode, name, opts) {
     endAt: 0, winner: null,
     projs: [], nextProj: 1,        // projectiles en vol (roquettes, grenades)
     portals: new Map(),            // id du propriétaire -> [portail bleu, portail orange]
+    planes: new Map(),             // avions en papier en vol : id du pilote -> avion
     nuke: null,                    // missile nucléaire en vol : { owner, at }
     gas: null,                     // gaz toxique après le missile : { owner, until }
   };
@@ -190,7 +192,7 @@ function newPlayer(room, id, ws, name, team) {
     token: null, away: false, graceUntil: 0, leaving: false,
     cls: CLASSES.classic, pending: null, loadout: CLASSES.classic.weapons.slice(), maxHp: MAX_HP, speedMul: 1, pull: null,
     streak: 0, streakAmmo: {}, stunUntil: 0, altUntil: {},
-    nades: 0, nadeReady: 0, nadeRegenAt: 0, st: newStats(),
+    nades: 0, nadeReady: 0, nadeRegenAt: 0, st: newStats(), chargeAt: 0,
     respawnAt: 0, protectUntil: 0, lastDamage: 0, nextFire: 0,
     hist: [],
   };
@@ -339,6 +341,7 @@ function resetMatch(room) {
   room.teamKills = { red: 0, blue: 0 };
   room.winner = null;
   room.nuke = null;
+  for (const id of [...room.planes.keys()]) endPlane(room, id, 'reset');
   if (room.gas) { room.gas = null; broadcast(room, { t: 'gas', off: 1 }); }
   room.state = room.cfg.id === 'duel' && room.players.size < 2 ? 'waiting' : 'playing';
   for (const p of room.players.values()) { p.k = 0; p.d = 0; p.level = 0; p.streak = 0; p.st = newStats(); }
@@ -353,6 +356,7 @@ function removePlayer(p) {
   if (p.token && tokens.get(p.token) === p) tokens.delete(p.token);
   if (!room || !room.players.delete(p.id)) return;
   if (room.portals.delete(p.id)) broadcast(room, { t: 'portalOff', o: p.id });
+  endPlane(room, p.id, 'leave');
   if (room.nuke?.owner === p) { room.nuke = null; broadcast(room, { t: 'nukeOff' }); }
   if (room.gas?.owner === p) { room.gas = null; broadcast(room, { t: 'gas', off: 1 }); }
   broadcast(room, { t: 'pleave', id: p.id });
@@ -502,7 +506,21 @@ function stepProjectiles(room, now, dt) {
         const tg = Math.max(0, -P.y / uy);
         if (tg < tHit) { tHit = tg; hitBox = null; ground = true; }
       }
-      if (!pr.bounce) { // les grenades à main rebondissent sur tout (joueurs compris) : seules les roquettes touchent de plein fouet
+      if (pr.pierce) { // orbe : traverse les ennemis en leur infligeant des dégâts une fois chacun
+        const seg = Math.min(len, tHit);
+        for (const q of room.players.values()) {
+          if (q === P.owner || !q.alive || now < q.protectUntil) continue;
+          if (room.cfg.teams && q.team === P.owner.team) continue;
+          if (P.hit && P.hit.has(q.id)) continue;
+          const cx = q.x - P.x, cy = q.y + 0.9 - P.y, cz = q.z - P.z;
+          const t = clamp(cx * ux + cy * uy + cz * uz, 0, seg);
+          if (Math.hypot(cx - ux * t, cy - uy * t, cz - uz * t) <= pr.pierce) {
+            (P.hit = P.hit || new Set()).add(q.id);
+            applyDamage(room, P.owner, q, pr.passDmg, false, P.wi, now);
+          }
+        }
+      }
+      if (!pr.bounce && !pr.pierce) { // les grenades à main rebondissent sur tout (joueurs compris) : seules les roquettes touchent de plein fouet
         for (const q of room.players.values()) {
           if (!q.alive || now < q.protectUntil) continue;
           if (q === P.owner && now - P.born < 150) continue;   // ne pas se toucher soi-même au départ
@@ -543,6 +561,54 @@ function stepProjectiles(room, now, dt) {
     keep.push(P);
   }
   room.projs = keep;
+}
+
+// ---- avion en papier : le pilote le dirige (message « pc »), le serveur le simule et gère les contacts ----
+function firePlane(room, p, o, d) {
+  if (room.planes.has(p.id)) return;
+  const yaw = Math.atan2(-d[0], -d[2]), pitch = Math.asin(clamp(d[1], -1, 1));
+  const pl = { owner: p, x: o[0] + d[0] * 0.8, y: o[1] + d[1] * 0.8, z: o[2] + d[2] * 0.8, yaw, pitch, wantYaw: yaw, wantPitch: pitch, born: Date.now() };
+  room.planes.set(p.id, pl);
+  send(p, { t: 'planeOn', x: r2(pl.x), y: r2(pl.y), z: r2(pl.z), yaw: r2(yaw), pitch: r2(pitch) });
+}
+
+function endPlane(room, id, why) {
+  const pl = room.planes.get(id);
+  if (!pl) return;
+  room.planes.delete(id);
+  broadcast(room, { t: 'planeOff', id, why, x: r2(pl.x), y: r2(pl.y), z: r2(pl.z) });
+}
+
+function stepPlanes(room, now, dt) {
+  if (!room.planes.size) return;
+  for (const [id, pl] of [...room.planes]) {
+    const owner = pl.owner;
+    if (!owner.alive || !room.players.has(id) || room.state === 'ended') { endPlane(room, id, 'death'); continue; }
+    const ox = pl.x, oy = pl.y, oz = pl.z;
+    stepPlane(pl, dt, pl.wantYaw, pl.wantPitch);
+    const dx = pl.x - ox, dy = pl.y - oy, dz = pl.z - oz, len = Math.hypot(dx, dy, dz);
+    if (len > 0) {
+      const m = rayMap(room.map, ox, oy, oz, dx / len, dy / len, dz / len, len + PLANE.radius * 0.5);
+      if (m.box) { endPlane(room, id, 'wall'); continue; }
+    }
+    if (pl.y <= 0.05) { endPlane(room, id, 'ground'); continue; }
+    if (now - pl.born > PLANE.life * 1000) { endPlane(room, id, 'time'); continue; }
+    // contact : tête = mort, corps = 60
+    let hit = null;
+    for (const q of room.players.values()) {
+      if (q === owner || !q.alive || now < q.protectUntil) continue;
+      if (room.cfg.teams && q.team === owner.team) continue;
+      const r = PLANE.radius;
+      if (Math.abs(pl.x - q.x) < BODY_HALF + r && Math.abs(pl.z - q.z) < BODY_HALF + r && pl.y > q.y - r && pl.y < q.y + HEAD_TOP + r) { hit = q; break; }
+    }
+    if (hit) {
+      const head = pl.y >= hit.y + BODY_TOP - 0.05;
+      endPlane(room, id, 'hit');
+      applyDamage(room, owner, hit, head ? PLANE.head : PLANE.body, head, W.PLANE, now);
+      continue;
+    }
+    broadcast(room, { t: 'plane', id, x: r2(pl.x), y: r2(pl.y), z: r2(pl.z), yaw: r2(pl.yaw), pitch: r2(pl.pitch) });
+  }
 }
 
 // ---- grenade à main (touche G) : lancée dans la direction visée, rebondit, explose après 2,4 s ----
@@ -711,6 +777,11 @@ function handleFire(p, m, now) {
   if (!w || !p.loadout.includes(wi)) return; // seules les armes de sa classe (ou de son niveau en Gun Game)
   if (now < p.stunUntil) return;              // étourdi : ne peut pas tirer
   if (w.streak !== undefined && !(p.streakAmmo[wi] > 0)) return;
+  if (w.charge) { // canon à orbe : le tir n'est accepté qu'après la charge complète (le client la commence par un message « charge »)
+    if (!p.chargeAt || now - p.chargeAt < w.charge - 300) return;
+    p.chargeAt = 0;
+    broadcast(room, { t: 'charge', id: p.id, on: 0 }, p);
+  }
 
   // Cadence de tir (avec une tolérance pour la gigue réseau)
   if (now + 100 < p.nextFire) return;
@@ -756,6 +827,8 @@ function handleFire(p, m, now) {
     case 'portal': return firePortal(room, p, w, m, o, dir);
     case 'beam': return fireBeam(room, p, w, wi, o, dir, targets, now);
     case 'nuke': return fireNuke(room, p, w, now);
+    case 'orb': return fireProjectile(room, p, w, wi, o, dir, now);
+    case 'plane': return firePlane(room, p, o, dir);
     default: break;
   }
 
@@ -810,6 +883,8 @@ function applyDamage(room, atk, vic, amount, head, wi, now) {
     return;
   }
   vic.hp = 0; vic.alive = false; vic.d++; vic.streak = 0;
+  vic.chargeAt = 0;
+  endPlane(room, vic.id, 'death');
   vic.respawnAt = now + RESPAWN;
   if (suicide) { // mort par sa propre explosion : pas de frag
     broadcast(room, { t: 'kill', a: atk.id, v: vic.id, w: wi, h: 0 });
@@ -929,11 +1004,24 @@ function handleMessage(ws, raw) {
     p.yaw = Number.isFinite(+m.yaw) ? +m.yaw : p.yaw;
     p.pitch = clamp(Number.isFinite(+m.pitch) ? +m.pitch : p.pitch, -1.6, 1.6);
     const wi = m.w | 0;
-    if (p.loadout.includes(wi)) p.weapon = wi;
+    if (p.loadout.includes(wi)) {
+      if (wi !== p.weapon && p.chargeAt) { p.chargeAt = 0; broadcast(p.room, { t: 'charge', id: p.id, on: 0 }, p); }
+      p.weapon = wi;
+    }
   } else if (m.t === 'fire') {
     handleFire(p, m, now);
   } else if (m.t === 'nade') {
     handleNade(p, m, now);
+  } else if (m.t === 'charge') { // début / annulation de la charge du canon à orbe
+    if (p.alive && WEAPONS[p.weapon]?.charge && !(m.on && now < p.stunUntil)) {
+      p.chargeAt = m.on ? now : 0;
+      broadcast(p.room, { t: 'charge', id: p.id, on: m.on ? 1 : 0 }, p);
+    }
+  } else if (m.t === 'pc') { // pilotage de l'avion en papier : cap voulu
+    const pl = p.room.planes.get(p.id);
+    if (pl && Number.isFinite(+m.yaw) && Number.isFinite(+m.pitch)) { pl.wantYaw = +m.yaw; pl.wantPitch = clamp(+m.pitch, -1, 1); }
+  } else if (m.t === 'pcancel') {
+    endPlane(p.room, p.id, 'cancel');
   }
 }
 
@@ -979,6 +1067,7 @@ setInterval(() => {
       snap.push([p.id, r2(p.x), r2(p.y), r2(p.z), r2(p.yaw), r2(p.pitch), Math.ceil(p.hp), p.weapon, p.alive && now < p.protectUntil ? 1 : 0]);
     }
     stepProjectiles(room, now, TICK_MS / 1000);
+    stepPlanes(room, now, TICK_MS / 1000);
     if (room.nuke && now >= room.nuke.at && room.state === 'playing') detonateNuke(room, now);
     stepGas(room, now, TICK_MS / 1000);
     broadcast(room, { t: 's', ts: now, p: snap });

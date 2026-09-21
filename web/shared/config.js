@@ -123,10 +123,24 @@ export const WEAPONS = [
     dmg: 105, headMul: 1, pellets: 1, spread: 0, mag: 0, reload: 0, falloff: null, speed: 1, recoil: 0,
     proj: { speed: 19, gravity: 18, life: 2.4, radius: 4.2, minMul: 0.2, self: 0.6, knock: 12, bounce: 0.45 },
   },
+  // ---- armes à 10 points (index 16, 17) : elles utilisent tout le budget d'une classe perso ----
+  {
+    // Canon à orbe : on appuie, il charge 1,8 s (on avance lentement), puis envoie une boule qui TRAVERSE les ennemis
+    // sur toute sa trajectoire (120 dégâts chacun) et explose sur le premier mur.
+    id: 'orb', name: 'Canon à orbe', kind: 'orb', cost: 10, auto: false, interval: 3500, charge: 1800,
+    dmg: 70, headMul: 1, pellets: 1, spread: 0, mag: 2, reload: 4000, falloff: null, speed: 0.8, recoil: 2.5,
+    proj: { speed: 34, gravity: 0, life: 4.5, radius: 5, minMul: 0.3, self: 0.5, knock: 14, pierce: 1.15, passDmg: 120 },
+  },
+  {
+    // Avion en papier : on le lance et on le pilote à la première personne (souris). Il plane lentement ;
+    // au contact d'un ennemi : tête = mort, corps = 60 (voir shared/plane.js). Tirer pendant le vol l'abandonne.
+    id: 'plane', name: 'Avion en papier', kind: 'plane', cost: 10, auto: false, interval: 1500,
+    dmg: 0, headMul: 1, pellets: 1, spread: 0, mag: 2, reload: 6000, falloff: null, speed: 1, recoil: 0,
+  },
 ];
 
 // Index des armes
-export const W = { AR: 0, SHOTGUN: 1, SNIPER: 2, REVOLVER: 3, KNIFE: 4, ROCKET: 5, EXCALIBUR: 6, GRAPPLE: 7, PORTAL: 8, MINIGUN: 9, GRENADE: 10, LASER: 11, CARBINE: 12, FLAME: 13, NUKE: 14, FRAG: 15 };
+export const W = { AR: 0, SHOTGUN: 1, SNIPER: 2, REVOLVER: 3, KNIFE: 4, ROCKET: 5, EXCALIBUR: 6, GRAPPLE: 7, PORTAL: 8, MINIGUN: 9, GRENADE: 10, LASER: 11, CARBINE: 12, FLAME: 13, NUKE: 14, FRAG: 15, ORB: 16, PLANE: 17 };
 
 // Grenades à main : 2 en réserve, une revient toutes les 12 s
 export const NADE_MAX = 2;

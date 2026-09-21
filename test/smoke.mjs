@@ -563,8 +563,63 @@ async function main() {
       S.at(-15, -25, Math.PI, W.KNIFE); await sleep(300);
       S.send({ t: 'nade', dx: 0, dy: -1, dz: 0 });
       const d = await S.waitFor('dmg', (m) => m.a === S.id, 4500).catch(() => null);
+      await sleep(150);
       check('grenade à ses pieds : dégâts sur soi (réduits) et projection', !!d && d.hp > 0 && d.hp < 80 && S.has('push'), JSON.stringify(d));
       await closeAll(S);
+    }
+    // --- canon à orbe : charge obligatoire, puis boule qui traverse tous les ennemis alignés ---
+    {
+      const A = await mk('Ob-A', [W.ORB]), B = await mk('Ob-B', [W.KNIFE]), C = await mk('Ob-C', [W.KNIFE]);
+      await sleep(450);
+      A.at(-15, -27, Math.PI, W.ORB); B.at(-15, -21, Math.PI); C.at(-15, -14, Math.PI); await sleep(300);   // le long mur (z=-10) est derrière C
+      A.fire(W.ORB, [-15, 1.0, -27], [0, 0, 1]);
+      await sleep(300);
+      check('orbe : sans charge, le tir est refusé', !A.has('proj', (m) => m.w === W.ORB));
+      A.send({ t: 'charge', on: 1 });
+      await sleep(300);
+      check('orbe : la charge est visible par les autres joueurs', B.has('charge', (m) => m.id === A.id && m.on === 1));
+      A.fire(W.ORB, [-15, 1.0, -27], [0, 0, 1]);
+      await sleep(300);
+      check('orbe : charge trop courte, tir refusé', !A.has('proj', (m) => m.w === W.ORB));
+      await sleep(1300);
+      A.fire(W.ORB, [-15, 1.0, -27], [0, 0, 1]);
+      const pj = await A.waitFor('proj', (m) => m.w === W.ORB, 1500).catch(() => null);
+      check('orbe : tir accepté après la charge complète', !!pj);
+      await sleep(1200);
+      check('orbe : traverse le 1er ennemi et le tue (120 dégâts)', B.has('kill', (m) => m.v === B.id && m.w === W.ORB));
+      check('orbe : continue et touche aussi le 2e ennemi derrière', C.has('kill', (m) => m.v === C.id && m.w === W.ORB));
+      const bm = await A.waitFor('boom', (m) => m.w === W.ORB, 3000).catch(() => null);
+      check('orbe : explose sur le premier mur rencontré (rayon 5)', !!bm && bm.r === 5, JSON.stringify(bm));
+      await closeAll(A, B, C);
+    }
+    // --- avion en papier : pilotage, contact corps (60) puis tête (mort), crash contre un mur ---
+    {
+      const A = await mk('Pl-A', [W.PLANE]), B = await mk('Pl-B', [W.KNIFE]);
+      await sleep(450);
+      A.at(-15, -25, Math.PI, W.PLANE); B.at(-15, -17, Math.PI); await sleep(300);
+      A.fire(W.PLANE, [-15, 1.6, -25], [0, 0, 1]);
+      const on = await A.waitFor('planeOn', null, 1500).catch(() => null);
+      check('avion : lancé, le pilote passe en vue de l\'avion', !!on);
+      A.send({ t: 'pc', yaw: Math.PI, pitch: 0 });
+      const off = await A.waitFor('planeOff', null, 4000).catch(() => null);
+      check('avion : posé sur l\'ennemi (contact au corps)', !!off && off.why === 'hit', JSON.stringify(off));
+      await sleep(200);
+      check('avion : 60 dégâts au corps (2 avions pour tuer)', dmgOf(B)?.hp === 40, JSON.stringify(dmgOf(B)));
+      check('avion : d\'autres joueurs voient son vol', B.has('plane', (m) => m.id === A.id));
+      await sleep(1500);
+      A.fire(W.PLANE, [-15, 1.6, -25], [0, 0, 1]);
+      await A.waitFor('planeOn', (m) => A.count('planeOn') === 2 || true, 1500).catch(() => null);
+      A.send({ t: 'pc', yaw: Math.PI, pitch: 0.06 });   // il garde son altitude : il arrive à hauteur de tête
+      await A.waitFor('planeOff', (m) => A.count('planeOff') >= 2, 4000).catch(() => null);
+      await sleep(300);
+      check('avion : contact à la tête = mort en un coup', B.has('kill', (m) => m.v === B.id && m.h === 1 && m.w === W.PLANE));
+      await sleep(1600);
+      A.at(-15, -25, 0, W.PLANE); await sleep(300);
+      A.fire(W.PLANE, [-15, 1.6, -25], [0, 0, -1]);
+      const offs = () => A.log.filter((m) => m.t === 'planeOff');
+      const t0 = Date.now(); while (offs().length < 3 && Date.now() - t0 < 4000) await sleep(50);
+      check('avion : contre un mur, il s\'écrase (sans dégâts)', offs().at(-1)?.why === 'wall', JSON.stringify(offs().at(-1)));
+      await closeAll(A, B);
     }
     // --- minigun : cadence très élevée ---
     {
