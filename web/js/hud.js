@@ -118,7 +118,7 @@ export class Hud {
     $('death').classList.toggle('hidden', !show);
     if (!show) return;
     $('death-title').textContent = killerName ? `Éliminé par ${killerName}` : 'Éliminé';
-    $('death-sub').textContent = seconds > 0 ? `Réapparition dans ${seconds}s` : 'Réapparition…';
+    $('death-sub').textContent = seconds < 0 ? 'Tu reviens à la prochaine manche' : seconds > 0 ? `Réapparition dans ${seconds}s` : 'Réapparition…';
   }
 
   hitmarker(kill) {
@@ -145,6 +145,19 @@ export class Hud {
     e.classList.add('on');
     clearTimeout(this.hintT);
     this.hintT = setTimeout(() => e.classList.remove('on'), ms);
+  }
+
+  // Survie : manche en cours (ligne du haut) et points
+  survLine(surv, cash, secLeft) {
+    const line = $('score-line'), sub = $('score-sub');
+    if (!surv) { line.textContent = 'SURVIE'; sub.textContent = ''; }
+    else {
+      line.textContent = surv.wave > 0 ? `MANCHE ${surv.wave}` : 'SURVIE';
+      sub.textContent = surv.phase === 'prep'
+        ? `Manche ${surv.wave + 1} dans ${secLeft} s · B : boutique`
+        : `${surv.left} ennemi${surv.left > 1 ? 's' : ''} restant${surv.left > 1 ? 's' : ''}`;
+    }
+    this._set('cash', 'cash', cash, (e, v) => { e.textContent = `💰 ${v}`; });
   }
 
   // Barre de charge du canon à orbe (0..1, null = masquée)
@@ -249,7 +262,7 @@ export class Hud {
       wrap.append(t);
       return wrap;
     };
-    if (MODES[mode].teams) {
+    if (MODES[mode].teams && mode !== 'survival') {
       box.replaceChildren(
         table(players.filter((p) => p.team === 'red'), `ÉQUIPE ROUGE — ${teamKills.red}`, TEAM_COLORS.red),
         table(players.filter((p) => p.team === 'blue'), `ÉQUIPE BLEUE — ${teamKills.blue}`, TEAM_COLORS.blue));

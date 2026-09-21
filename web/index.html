@@ -26,7 +26,7 @@
     <div id="banner"></div>
     <div id="death" class="hidden"><div id="death-title"></div><div id="death-sub"></div></div>
     <div id="bottom-left"><div id="hp-bar"><div id="hp-fill"></div></div><div id="hp-text">100</div></div>
-    <div id="bottom-right"><div id="weapon-name"></div><div id="ammo"></div><div id="nades"></div><div id="special"></div></div>
+    <div id="bottom-right"><div id="weapon-name"></div><div id="ammo"></div><div id="cash"></div><div id="nades"></div><div id="special"></div></div>
     <div id="weapons"></div>
     <div id="hint"></div>
     <div id="netinfo"></div>
@@ -66,6 +66,7 @@
     <button class="tbtn" data-act="reload" id="t-reload">R</button>
     <button class="tbtn" data-act="scope" id="t-scope">ZOOM</button>
     <button class="tbtn" data-act="nade" id="t-nade">G</button>
+    <button class="tbtn small" data-act="shop" id="t-shop">🛒</button>
     <button class="tbtn small" data-act="score" id="t-score">☰</button>
     <button class="tbtn small" data-act="pause" id="t-pause">⚙</button>
   </div>
@@ -88,6 +89,7 @@
         <button class="mode" data-mode="duel"><b>⚔ 1v1</b><small>Duel · 10 frags</small><em data-count="duel"></em></button>
         <button class="mode" data-mode="tdm"><b>🔴🔵 Équipes</b><small>Rouge vs Bleu · 30 frags</small><em data-count="tdm"></em></button>
         <button class="mode" data-mode="ffa"><b>💀 Chacun pour soi</b><small>Tous contre tous · 20 frags</small><em data-count="ffa"></em></button>
+        <button class="mode" data-mode="survival"><b>🧟 Survie</b><small>Manches infinies · solo ou coop · boutique</small><em data-count="survival"></em></button>
         <button class="mode" data-mode="gun"><b>🔫 Gun Game</b><small>Une arme par niveau · le couteau gagne</small><em data-count="gun"></em></button>
       </div>
 
@@ -139,9 +141,18 @@
 
       <details class="help">
         <summary>Contrôles</summary>
-        <p class="desktop-only"><b>ZQSD / WASD</b> bouger · <b>Souris</b> viser · <b>Clic gauche</b> (ou <b>F</b> / <b>Entrée</b>) tirer · <b>Clic droit</b> zoom sniper · <b>Espace</b> sauter · <b>R</b> recharger · <b>1-9 / molette</b> armes · <b>Clic droit</b> ou <b>E</b> tir secondaire (portail orange, onde d'Excalibur) · <b>G</b> grenade · <b>6 / 7 / 8</b> armes de série (5 / 10 / 15 kills d'affilée) · <b>Tab</b> scores · <b>M</b> mini-carte · <b>Échap</b> pause<br>Portable sans souris : <b>flèches</b> pour viser, <b>F</b> pour tirer, et le <b>tir automatique</b> (réglages) tire tout seul quand un ennemi est dans le viseur.</p>
+        <p class="desktop-only"><b>ZQSD / WASD</b> bouger · <b>Souris</b> viser · <b>Clic gauche</b> (ou <b>F</b> / <b>Entrée</b>) tirer · <b>Clic droit</b> zoom sniper · <b>Espace</b> sauter · <b>R</b> recharger · <b>1-9 / molette</b> armes · <b>Clic droit</b> ou <b>E</b> tir secondaire (portail orange, onde d'Excalibur) · <b>G</b> grenade · <b>B</b> boutique (survie) · <b>6 / 7 / 8</b> armes de série (5 / 10 / 15 kills d'affilée) · <b>Tab</b> scores · <b>M</b> mini-carte · <b>Échap</b> pause<br>Portable sans souris : <b>flèches</b> pour viser, <b>F</b> pour tirer, et le <b>tir automatique</b> (réglages) tire tout seul quand un ennemi est dans le viseur.</p>
         <p class="touch-only"><b>Joystick gauche</b> bouger · <b>Glisser à droite</b> viser · <b>FEU</b> tirer (glisse dessus pour viser en tirant) · <b>ZOOM</b> pour le sniper</p>
       </details>
+    </div>
+  </div>
+
+  <!-- ============================ Boutique (survie) ============================ -->
+  <div id="shop" class="overlay hidden">
+    <div class="panel">
+      <h2>BOUTIQUE <span id="shop-cash"></span></h2>
+      <div id="shop-list"></div>
+      <button id="shop-close" class="btn primary">Fermer (B)</button>
     </div>
   </div>
 

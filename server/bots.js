@@ -234,6 +234,59 @@ export function findPath(map, sx, sz, tx, tz) {
   return out;
 }
 
+// ---- champ de flux (survie) : une seule recherche par salle donne, pour chaque case, la distance jusqu'au joueur humain le plus proche ;
+// chaque monstre n'a plus qu'à descendre la pente (pas de chemin à calculer par monstre) ----
+export function computeFlow(map, sources) {
+  const g = gridFor(map), { n, o, walk } = g;
+  const dist = new Float32Array(n * n).fill(Infinity);
+  const heap = new Heap();
+  const cell = (v) => clamp(Math.round((v - o) / CELL), 0, n - 1);
+  for (const s of sources) {
+    const k = snap(g, cell(s.x), cell(s.z), 6);
+    if (k >= 0 && dist[k] !== 0) { dist[k] = 0; heap.push(0, k); }
+  }
+  while (heap.size) {
+    const cur = heap.pop();
+    const dc = dist[cur];
+    const ci = cur % n, cj = (cur / n) | 0;
+    for (let k = 0; k < 8; k++) {
+      const ni = ci + DX[k], nj = cj + DY[k];
+      if (ni < 0 || nj < 0 || ni >= n || nj >= n) continue;
+      const nk = ni + nj * n;
+      if (!walk[nk]) continue;
+      if (k >= 4 && (!walk[ni + cj * n] || !walk[ci + nj * n])) continue;
+      const nd = dc + (k >= 4 ? 1.414 : 1);
+      if (nd < dist[nk]) { dist[nk] = nd; heap.push(nd, nk); }
+    }
+  }
+  return { dist, n, o };
+}
+
+// Direction (monde, normalisée) qui rapproche de la source la plus proche, ou null si on y est / si rien n'est joignable
+export function flowDir(map, flow, x, z) {
+  if (!flow) return null;
+  const g = gridFor(map), { n, o, walk } = g, { dist } = flow;
+  const cell = (v) => clamp(Math.round((v - o) / CELL), 0, n - 1);
+  let c = cell(x) + cell(z) * n;
+  if (!walk[c]) { c = snap(g, cell(x), cell(z), 3); if (c < 0) return null; }
+  const ci = c % n, cj = (c / n) | 0;
+  let best = -1, bd = dist[c];
+  for (let k = 0; k < 8; k++) {
+    const ni = ci + DX[k], nj = cj + DY[k];
+    if (ni < 0 || nj < 0 || ni >= n || nj >= n) continue;
+    const nk = ni + nj * n;
+    if (!walk[nk]) continue;
+    if (k >= 4 && (!walk[ni + cj * n] || !walk[ci + nj * n])) continue;
+    if (dist[nk] < bd) { bd = dist[nk]; best = nk; }
+  }
+  if (best < 0) return null;
+  // on vise un peu plus loin que la case voisine : trajectoire plus lisse
+  const bi = best % n, bj = (best / n) | 0;
+  const tx = o + bi * CELL + (bi - ci) * CELL * 0.6, tz = o + bj * CELL + (bj - cj) * CELL * 0.6;
+  const dx = tx - x, dz = tz - z, l = Math.hypot(dx, dz) || 1;
+  return { x: dx / l, z: dz / l };
+}
+
 // Direction (monde) vers le prochain point du chemin vers `goal`, recalculé si le but change
 function pathDir(map, b, ai, goal, now) {
   const toGoal = () => {
@@ -281,7 +334,7 @@ function fleePoint(map, b, threat) {
 }
 
 // ------------------------------------------------------------------ perception ----
-function canSee(b, t, sight, boxes) {
+export function canSee(b, t, sight, boxes) {
   const ex = b.x, ey = b.y + EYE_HEIGHT, ez = b.z;
   for (const ty of [t.y + 1.0, t.y + 1.6]) {
     const dx = t.x - ex, dy = ty - ey, dz = t.z - ez;

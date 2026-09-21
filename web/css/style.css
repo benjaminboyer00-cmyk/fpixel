@@ -260,3 +260,20 @@ body.touch #ammo { font-size: 22px; }
 #charge { position: absolute; left: 50%; bottom: 128px; transform: translateX(-50%); width: min(260px, 50vw); height: 12px; background: rgba(0, 0, 0, .6); border: 2px solid #b455ff; }
 #charge i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, #6b3fa0, #e0a8ff); }
 #charge.hidden { display: none; }
+
+/* ---------- survie : points, boutique ---------- */
+#cash { margin-top: 6px; font-size: 22px; font-weight: 700; color: #ffd166; text-align: right; }
+#t-shop { right: calc(max(8px, env(safe-area-inset-right)) + 96px); }
+#shop { background: rgba(6, 8, 12, .88); z-index: 65; }
+#shop .panel { width: min(560px, 100%); max-height: 92vh; overflow: auto; }
+#shop h2 span { float: right; color: #ffd166; letter-spacing: 1px; }
+#shop-list h3 { margin: 12px 0 4px; font-size: 12px; letter-spacing: 2px; color: var(--dim); text-transform: uppercase; }
+.shop-row { display: grid; grid-template-columns: 1fr auto auto; gap: 4px 10px; align-items: center; padding: 6px 8px; margin: 3px 0; background: #11161d; border: 2px solid var(--line); }
+.shop-row b { font-size: 14px; }
+.shop-row small { grid-column: 1; color: var(--dim); font-size: 11px; }
+.shop-row .price { grid-row: 1 / span 2; grid-column: 2; color: #ffd166; font-weight: 700; }
+.shop-row button { grid-row: 1 / span 2; grid-column: 3; padding: 6px 12px; font: inherit; font-weight: 700; color: #1a1200; background: var(--accent); border: 2px solid #ffd166; cursor: pointer; }
+.shop-row button:disabled { opacity: .35; cursor: default; }
+.shop-row.own { opacity: .6; }
+#t-shop { display: none; }
+body.survival #t-shop { display: block; }

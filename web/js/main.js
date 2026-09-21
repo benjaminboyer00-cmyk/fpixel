@@ -5,7 +5,7 @@ import { Hud } from './hud.js';
 import { Game } from './game.js';
 import { sfx } from './audio.js';
 import { loadSettings, saveSettings, isTouch, SERVER_HOST } from './config.js';
-import { MODES } from '../shared/config.js';
+import { MODES, SHOP, WEAPONS, shopPrice } from '../shared/config.js';
 import { MAPS } from '../shared/map.js';
 import { mountClassPicker } from './classes-ui.js';
 
@@ -40,6 +40,7 @@ let game = null;
 let busy = false;
 let cancelled = false;
 let settingsOpen = false;
+let shopOpen = false;
 let reconnecting = false;
 let welcomeWaiter = null;
 
@@ -55,7 +56,8 @@ const token = (() => {
 
 function joinMsg() {
   return {
-    t: 'join', name: settings.name, mode: settings.mode, room: settings.room.trim(),
+    t: 'join', name: settings.name, mode: settings.mode,
+    room: settings.room.trim() || (settings.mode === 'survival' ? `solo-${token.slice(0, 10)}` : ''),   // survie : salon privé (solo) sauf si on donne un nom pour jouer en coop
     bots: settings.bots ? (settings.fill || 1) : 0, diff: settings.diff, limit: settings.limit, token,
     map: settings.map, cls: settings.cls, loadout: settings.cls === 'custom' ? settings.custom : undefined,
   };
@@ -69,7 +71,13 @@ if (!MODES[settings.mode]) settings.mode = 'ffa';
 function selectMode(m) {
   settings.mode = m;
   document.querySelectorAll('.mode').forEach((b) => b.classList.toggle('sel', b.dataset.mode === m));
-  $('f-class').classList.toggle('off', m === 'gun'); // Gun Game : les armes sont imposées par le niveau
+  $('f-class').classList.toggle('off', m === 'gun' || m === 'survival'); // Gun Game : armes imposées par le niveau ; survie : armes achetées en boutique
+  const surv = m === 'survival';
+  document.querySelector('.f-bots').classList.toggle('hidden', surv);
+  document.querySelector('.f-room').firstChild.textContent = surv ? 'Salon coop ' : 'Salon privé ';
+  const opt = { easy: surv ? 'Monstres faibles' : 'Bots faciles', normal: surv ? 'Monstres normaux' : 'Bots normaux', hard: surv ? 'Monstres coriaces' : 'Bots difficiles' };
+  for (const o of $('diff').options) o.textContent = opt[o.value];
+  if (surv && settings.map === 'arena' && $('map')) { settings.map = 'city'; $('map').value = 'city'; $('map-desc').textContent = MAPS.city.desc; }
   saveSettings(settings);
 }
 document.querySelectorAll('.mode').forEach((b) => b.addEventListener('click', () => selectMode(b.dataset.mode)));
@@ -129,6 +137,7 @@ setInterval(refreshStatus, 6000);
 refreshStatus();
 
 function showMenu(msg) {
+  shopOpen = false; $('shop').classList.add('hidden');
   $('menu').classList.remove('hidden');
   $('touch').classList.add('hidden');
   $('pause').classList.add('hidden');
@@ -166,7 +175,7 @@ async function play() {
   setStatus('wait', 'Connexion au serveur…');
 
   try {
-    if (!game) { game = new Game({ canvas: $('game'), input, net, hud, getSettings: () => settings }); game.onMatchEnd = recordMatch; }
+    if (!game) { game = new Game({ canvas: $('game'), input, net, hud, getSettings: () => settings }); game.onMatchEnd = recordMatch; game.onShop = () => toggleShop(); game.onShopChange = () => { if (shopOpen) renderShop(); }; }
   } catch (e) {
     console.error(e);
     return showMenu("WebGL n'est pas disponible sur cet appareil/navigateur.");
@@ -238,7 +247,7 @@ function onWelcome(m) {
 
 // ---------------------------------------------------------------- pause ----
 function showPause(first = false) {
-  $('pause-class').classList.toggle('hidden', game.mode === 'gun');
+  $('pause-class').classList.toggle('hidden', game.mode === 'gun' || game.mode === 'survival');
   mountPausePicker();
   $('pause').querySelector('h2').textContent = first ? 'PRÊT ?' : 'PAUSE';
   $('resume').textContent = first ? 'Jouer' : 'Reprendre';
@@ -252,7 +261,7 @@ function hidePause() {
 input.onLockChange = (locked) => {
   if (!game?.running) return;
   if (locked) hidePause();
-  else if (!settingsOpen) showPause();
+  else if (!settingsOpen && !shopOpen) showPause();
 };
 input.onPause = () => showPause();
 document.addEventListener('pointerlockerror', () => { if (game?.running && !input.locked) showPause(true); });
@@ -268,6 +277,47 @@ $('quit').addEventListener('click', () => {
   if (document.pointerLockElement) document.exitPointerLock();
   showMenu();
 });
+
+// ---------------------------------------------------------------- boutique (survie) ----
+function renderShop() {
+  const me = game?.me;
+  if (!me) return;
+  $('shop-cash').textContent = `💰 ${me.cash}`;
+  const list = $('shop-list');
+  list.replaceChildren();
+  const owned = new Set(me.loadout);
+  const row = (it) => {
+    const price = shopPrice(it, me.up);
+    const lvl = it.kind === 'up' ? (me.up[it.stat] || 0) : 0;
+    const have = it.kind === 'weapon' && owned.has(it.w);
+    const maxed = it.kind === 'up' && lvl >= it.max;
+    const name = it.kind === 'weapon' ? WEAPONS[it.w].name : it.name;
+    const div = document.createElement('div');
+    div.className = `shop-row${have || maxed ? ' own' : ''}`;
+    const b = document.createElement('b'); b.textContent = it.kind === 'up' ? `${name} (${lvl}/${it.max})` : name;
+    const small = document.createElement('small'); small.textContent = it.desc || (it.kind === 'weapon' ? `Touche ${me.loadout.length + 1} une fois achetée` : '');
+    const p = document.createElement('span'); p.className = 'price'; p.textContent = have ? 'Possédé' : maxed ? 'Max' : `💰 ${price}`;
+    const btn = document.createElement('button'); btn.textContent = 'Acheter';
+    btn.disabled = have || maxed || me.cash < price;
+    btn.addEventListener('click', () => net.send({ t: 'buy', id: it.id }));
+    div.append(b, small, p, btn);
+    return div;
+  };
+  const sec = (title, items) => { const h = document.createElement('h3'); h.textContent = title; list.append(h, ...items.map(row)); };
+  sec('Équipement', SHOP.filter((i) => i.kind !== 'weapon'));
+  sec('Armes', SHOP.filter((i) => i.kind === 'weapon'));
+}
+function toggleShop(force) {
+  if (!game?.running || game.mode !== 'survival') return;
+  shopOpen = force !== undefined ? force : !shopOpen;
+  $('shop').classList.toggle('hidden', !shopOpen);
+  if (shopOpen) {
+    renderShop();
+    if (document.pointerLockElement) document.exitPointerLock();   // pour pouvoir cliquer sur les articles
+  } else if (!isTouch) input.requestLock();
+}
+$('shop-close').addEventListener('click', () => toggleShop(false));
+document.addEventListener('keydown', (e) => { if (shopOpen && (e.code === 'KeyB' || e.code === 'Escape')) { e.preventDefault(); toggleShop(false); } });
 
 // ---------------------------------------------------------------- réglages ----
 const SLIDERS = [

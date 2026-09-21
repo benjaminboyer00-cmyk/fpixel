@@ -33,6 +33,7 @@ export const MODES = {
   duel: { id: 'duel', label: '1v1', desc: 'Duel, premier à 10 frags', max: 2, fill: 2, killLimit: 10, teams: false },
   tdm: { id: 'tdm', label: 'Match à mort par équipe', desc: 'Rouge contre Bleu, 30 frags', max: 10, fill: 8, killLimit: 30, teams: true },
   ffa: { id: 'ffa', label: 'Chacun pour soi', desc: 'Tous contre tous, 20 frags', max: 10, fill: 6, killLimit: 20, teams: false },
+  survival: { id: 'survival', label: 'Survie', desc: 'Manches infinies contre des monstres, solo ou coop', max: 4, fill: 0, killLimit: 0, teams: true },
   gun: { id: 'gun', label: 'Gun Game', desc: 'Une arme par niveau, le couteau gagne', max: 10, fill: 6, killLimit: 0, teams: false },
 };
 
@@ -184,3 +185,41 @@ export function resolveClass(id, loadout) {
 
 export const TEAM_COLORS = { red: '#e5484d', blue: '#3e82f7' };
 export const FFA_COLORS = ['#e5484d', '#f5a524', '#f5d90a', '#46a758', '#12a594', '#3e82f7', '#8e4ec6', '#e93d82', '#a18072', '#889096'];
+
+// ---------------------------------------------------------------- Mode survie ----
+// Les joueurs (équipe bleue) affrontent des monstres (équipe rouge) manche après manche, sans fin.
+// Entre deux manches : préparation. On gagne des points (💰) en tuant, et on les dépense à la boutique (touche B).
+export const SURV = {
+  PREP_MS: 15000,       // préparation entre deux manches
+  FIRST_PREP_MS: 20000, // avant la première manche
+  OVER_MS: 12000,       // écran de fin de partie avant de recommencer à la manche 1
+  MAX_MOBS: 24,         // monstres vivants en même temps (les autres attendent)
+  START_CASH: 150,
+  WAVE_BONUS: 100,      // points offerts à chaque joueur à la fin d'une manche (+ 20 par numéro de manche)
+  START_WEAPONS: [3, 4], // revolver + couteau
+};
+
+// Boutique. weapon : arme achetée pour le reste de la partie ; up : amélioration qui coûte plus cher à chaque niveau.
+const shopWeapon = (id, w, price) => ({ id, kind: 'weapon', w, price });
+export const SHOP = [
+  { id: 'heal', kind: 'heal', name: 'Soins', desc: 'Vie pleine', price: 80 },
+  { id: 'nades', kind: 'nades', name: 'Grenades', desc: 'Réserve pleine', price: 60 },
+  { id: 'hp', kind: 'up', stat: 'hp', name: '+25 PV max', desc: 'Vie maximale', base: 250, growth: 1.5, max: 8 },
+  { id: 'dmg', kind: 'up', stat: 'dmg', name: '+15 % de dégâts', desc: 'Toutes les armes', base: 500, growth: 1.6, max: 8 },
+  { id: 'spd', kind: 'up', stat: 'spd', name: '+6 % de vitesse', desc: 'Déplacement', base: 300, growth: 1.5, max: 5 },
+  shopWeapon('w-grapple', W.GRAPPLE, 200),
+  shopWeapon('w-portal', W.PORTAL, 250),
+  shopWeapon('w-shotgun', W.SHOTGUN, 300),
+  shopWeapon('w-ar', W.AR, 350),
+  shopWeapon('w-sniper', W.SNIPER, 650),
+  shopWeapon('w-carbine', W.CARBINE, 750),
+  shopWeapon('w-grenade', W.GRENADE, 900),
+  shopWeapon('w-excalibur', W.EXCALIBUR, 1300),
+  shopWeapon('w-rocket', W.ROCKET, 1600),
+  shopWeapon('w-minigun', W.MINIGUN, 2200),
+  shopWeapon('w-plane', W.PLANE, 2800),
+  shopWeapon('w-orb', W.ORB, 3500),
+];
+export const shopItem = (id) => SHOP.find((s) => s.id === id);
+// Prix actuel d'un article ; levels = niveaux d'amélioration de l'acheteur { hp, dmg, spd }
+export const shopPrice = (it, levels = {}) => (it.kind === 'up' ? Math.round(it.base * Math.pow(it.growth, levels[it.stat] || 0)) : it.price);

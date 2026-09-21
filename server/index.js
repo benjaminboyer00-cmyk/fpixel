@@ -10,12 +10,18 @@ import { WebSocketServer } from 'ws';
 import {
   TICK_MS, REWIND_MAX_MS, MAX_RAY, EYE_HEIGHT, MAX_HP, RESPAWN_MS, SPAWN_PROTECT_MS,
   REGEN_DELAY_MS, REGEN_PER_S, END_SCREEN_MS, BODY_HALF, BODY_TOP, HEAD_HALF, HEAD_TOP,
-  MODES, WEAPONS, GUN_ORDER, KNIFE, CLASSES, resolveClass, W, STREAK_WEAPONS, STREAK_AT, NUKE_GAS_MS, NUKE_GAS_DPS, NADE_MAX, NADE_REGEN_MS,
+  MODES, WEAPONS, GUN_ORDER, KNIFE, CLASSES, resolveClass, W, STREAK_WEAPONS, STREAK_AT, NUKE_GAS_MS, NUKE_GAS_DPS, NADE_MAX, NADE_REGEN_MS, SURV, shopItem, shopPrice,
 } from '../web/shared/config.js';
 import { MAPS, mapById } from '../web/shared/map.js';
 import { rayAABB, applySpread, mulberry32, clamp } from '../web/shared/util.js';
-import { BOT_NAMES, newBotAI, botStep, botClass } from './bots.js';
+import { BOT_NAMES, newBotAI, botStep, botClass, computeFlow } from './bots.js';
+import { MOBS, mobPower, waveList, newMobState, mobStep } from './mobs.js';
 import { stepPlane, PLANE } from '../web/shared/plane.js';
+
+// Survie : réglages surchargeables (tests) — durées de préparation / de fin de partie, argent de départ, vitesse des monstres
+const SURV_T = { first: Number(process.env.SURV_FIRST_PREP_MS) || SURV.FIRST_PREP_MS, prep: Number(process.env.SURV_PREP_MS) || SURV.PREP_MS, over: Number(process.env.SURV_OVER_MS) || SURV.OVER_MS };
+const SURV_CASH = process.env.SURV_START_CASH !== undefined ? Number(process.env.SURV_START_CASH) : SURV.START_CASH;
+const MOB_SPEED = Number(process.env.SURV_MOB_SPEED) || 1;
 
 const STREAKS = process.env.STREAKS ? process.env.STREAKS.split(',').map(Number) : STREAK_AT; // kills d'affilée pour le laser, le lance-flammes, le missile
 
@@ -136,7 +142,7 @@ function createRoom(id, mode, name, opts) {
   const cfg = MODES[mode];
   const room = {
     id, mode, name, cfg, auto: false,
-    fill: opts.bots === 0 ? 0 : opts.bots === 1 ? cfg.fill : Math.min(opts.bots, cfg.max), // joueurs visés (humains + bots)
+    fill: mode === 'survival' || opts.bots === 0 ? 0 : opts.bots === 1 ? cfg.fill : Math.min(opts.bots, cfg.max), // joueurs visés (humains + bots)
     diff: opts.diff, optsKey: optsKey(opts), map: mapById(opts.map),
     killLimit: mode === 'gun' ? GUN_ORDER.length : opts.limit || Number(process.env.KILL_LIMIT) || cfg.killLimit,
     players: new Map(),
@@ -146,6 +152,8 @@ function createRoom(id, mode, name, opts) {
     projs: [], nextProj: 1,        // projectiles en vol (roquettes, grenades)
     portals: new Map(),            // id du propriétaire -> [portail bleu, portail orange]
     planes: new Map(),             // avions en papier en vol : id du pilote -> avion
+    surv: mode === 'survival' ? { wave: 0, phase: 'prep', until: Date.now() + SURV_T.first, queue: [], nextSpawn: 0, lastSent: 0 } : null,   // manches de la survie
+    flow: null, flowAt: 0, flowKey: '',   // champ de flux des monstres (survie)
     nuke: null,                    // missile nucléaire en vol : { owner, at }
     gas: null,                     // gaz toxique après le missile : { owner, until }
   };
@@ -177,6 +185,7 @@ function cleanRoom(s) {
 // ---------------------------------------------------------------- Joueurs ----
 
 function pickTeam(room) {
+  if (room.mode === 'survival') return 'blue';   // les joueurs sont ensemble contre les monstres (rouges)
   if (!room.cfg.teams) return null;
   let red = 0, blue = 0;
   for (const q of room.players.values()) q.team === 'red' ? red++ : blue++;
@@ -193,6 +202,7 @@ function newPlayer(room, id, ws, name, team) {
     cls: CLASSES.classic, pending: null, loadout: CLASSES.classic.weapons.slice(), maxHp: MAX_HP, speedMul: 1, pull: null,
     streak: 0, streakAmmo: {}, stunUntil: 0, altUntil: {},
     nades: 0, nadeReady: 0, nadeRegenAt: 0, st: newStats(), chargeAt: 0,
+    cash: 0, owned: [], up: { hp: 0, dmg: 0, spd: 0 }, dmgMul: 1, mob: null, mst: null, scale: 1, nextAtk: 0,   // survie
     respawnAt: 0, protectUntil: 0, lastDamage: 0, nextFire: 0,
     hist: [],
   };
@@ -201,6 +211,7 @@ function newPlayer(room, id, ws, name, team) {
 function addPlayer(room, ws, name) {
   const id = nextPlayerId++;
   const p = newPlayer(room, id, ws, cleanName(name, id), pickTeam(room));
+  if (room.mode === 'survival') p.cash = SURV_CASH + Math.max(0, room.surv.wave - 1) * 120;   // rattrapage pour ceux qui arrivent en cours de partie
   room.players.set(id, p);
   ws.player = p;
   return p;
@@ -228,6 +239,7 @@ function dropPlayer(room, p) {
 // Ajuste le nombre de bots pour que la partie soit "pleine" (humains + bots = room.fill).
 // Retourne true si des bots ont été ajoutés ou retirés.
 function adjustBots(room) {
+  if (room.mode === 'survival') return false;
   const humans = humanCount(room);
   if (!humans) return false;
   const want = room.fill > 0 ? Math.max(0, room.fill - humans) : 0;
@@ -265,7 +277,10 @@ function afterRosterChange(room) {
 }
 
 function publicPlayer(p) {
-  return { id: p.id, name: p.name, team: p.team, k: p.k, d: p.d, hp: p.hp, w: p.weapon, bot: !!p.bot, lvl: shownLevel(p) };
+  return {
+    id: p.id, name: p.name, team: p.team, k: p.k, d: p.d, hp: p.hp, w: p.weapon, bot: !!p.bot, lvl: shownLevel(p),
+    ...(p.mob ? { mob: { c: p.mob.color, s: p.mob.scale, max: p.maxHp, t: p.mob.type } } : {}),
+  };
 }
 
 const shownLevel = (p) => Math.min(p.level, GUN_ORDER.length - 1);
@@ -273,7 +288,7 @@ const shownLevel = (p) => Math.min(p.level, GUN_ORDER.length - 1);
 function scoreMsg(room) {
   return {
     t: 'score',
-    p: [...room.players.values()].map((p) => [p.id, p.k, p.d, shownLevel(p)]),
+    p: [...room.players.values()].filter((p) => !p.mob).map((p) => [p.id, p.k, p.d, shownLevel(p)]),
     team: room.teamKills,
   };
 }
@@ -304,6 +319,7 @@ function statsMsg(room) {
   const rows = [];
   let mvp = null;
   for (const p of room.players.values()) {
+    if (p.mob) continue;
     const s = p.st;
     let fav = -1, fn = 0;
     for (const [wi, n] of Object.entries(s.byWeapon)) if (n > fn) { fn = n; fav = +wi; }
@@ -316,6 +332,14 @@ function statsMsg(room) {
 
 // Applique la classe (choisie à l'arrivée, ou changée depuis la pause : effet à la réapparition)
 function applyClass(room, p) {
+  if (room.mode === 'survival') { // survie : revolver + couteau, puis ce qui a été acheté à la boutique
+    p.pending = null;
+    p.loadout = [...SURV.START_WEAPONS, ...p.owned];
+    p.maxHp = MAX_HP + 25 * p.up.hp; p.speedMul = 1 + 0.06 * p.up.spd; p.dmgMul = 1 + 0.15 * p.up.dmg;
+    p.streakAmmo = {};
+    if (!p.loadout.includes(p.weapon)) p.weapon = p.loadout[0];
+    return;
+  }
   if (p.bot && room.mode !== 'gun') p.pending = botClass(p.ai.diff);   // les bots changent de classe à chaque réapparition
   if (p.pending) { p.cls = p.pending; p.pending = null; }
   if (room.mode === 'gun') { p.loadout = [GUN_ORDER[shownLevel(p)], KNIFE]; p.maxHp = MAX_HP; p.speedMul = 1; }
@@ -338,6 +362,12 @@ function spawnPlayer(room, p, now = Date.now()) {
 }
 
 function resetMatch(room) {
+  if (room.mode === 'survival') { // fin de partie : tout recommence à la manche 1
+    for (const p of [...room.players.values()]) if (p.mob) dropPlayer(room, p);
+    room.surv = { wave: 0, phase: 'prep', until: Date.now() + SURV_T.first, queue: [], nextSpawn: 0, lastSent: 0 };
+    room.flow = null;
+    for (const p of room.players.values()) { p.cash = SURV_CASH; p.owned = []; p.up = { hp: 0, dmg: 0, spd: 0 }; p.dmgMul = 1; sendCash(p); }
+  }
   room.teamKills = { red: 0, blue: 0 };
   room.winner = null;
   room.nuke = null;
@@ -407,10 +437,12 @@ function rayMap(map, ox, oy, oz, dx, dy, dz, maxD) {
 function rayPlayers(targets, ox, oy, oz, dx, dy, dz, tMax, pad = 0) {
   let best = null;
   for (const tg of targets) {
+    const sc = tg.q.scale || 1;   // les gros monstres ont une boîte de collision à leur taille
+    const bh = BODY_HALF * sc, bt = BODY_TOP * sc, hh = HEAD_HALF * sc, ht = HEAD_TOP * sc;
     const tb = rayAABB(ox, oy, oz, dx, dy, dz,
-      tg.x - BODY_HALF - pad, tg.y, tg.z - BODY_HALF - pad, tg.x + BODY_HALF + pad, tg.y + BODY_TOP, tg.z + BODY_HALF + pad, tMax);
+      tg.x - bh - pad, tg.y, tg.z - bh - pad, tg.x + bh + pad, tg.y + bt, tg.z + bh + pad, tMax);
     const th = rayAABB(ox, oy, oz, dx, dy, dz,
-      tg.x - HEAD_HALF - pad, tg.y + BODY_TOP, tg.z - HEAD_HALF - pad, tg.x + HEAD_HALF + pad, tg.y + HEAD_TOP, tg.z + HEAD_HALF + pad, tMax);
+      tg.x - hh - pad, tg.y + bt, tg.z - hh - pad, tg.x + hh + pad, tg.y + ht, tg.z + hh + pad, tMax);
     let t = -1, head = false;
     if (th >= 0 && (tb < 0 || th <= tb)) { t = th; head = true; } else if (tb >= 0) t = tb;
     if (t >= 0 && t < tMax && (!best || t < best.t)) best = { tg, t, head };
@@ -611,6 +643,136 @@ function stepPlanes(room, now, dt) {
   }
 }
 
+// ================================================================ SURVIE ====
+const sendCash = (p) => send(p, { t: 'cash', n: p.cash, up: p.up, owned: p.owned });
+
+function liveMobs(room) {
+  let n = 0;
+  for (const p of room.players.values()) if (p.mob && p.alive) n++;
+  return n;
+}
+
+function survMsg(room) {
+  const S = room.surv;
+  return { t: 'surv', wave: S.wave, phase: S.phase, left: S.queue.length + liveMobs(room), until: S.until };
+}
+
+// Fait apparaître un monstre à l'un des 3 points les plus éloignés des joueurs
+function spawnMob(room, key, now) {
+  const S = room.surv, def = MOBS[key], pw = mobPower(S.wave, room.diff);
+  const humans = [...room.players.values()].filter((q) => !q.bot && q.alive);
+  const list = room.map.mobSpawns || room.map.spawns;
+  const scored = list.map((s) => ({ s, d: Math.min(999, ...humans.map((h) => Math.hypot(h.x - s.x, h.z - s.z))) })).sort((a, b) => b.d - a.d).slice(0, 3);
+  const at = scored[(Math.random() * scored.length) | 0].s;
+  const id = nextPlayerId++;
+  const p = newPlayer(room, id, null, def.name, 'red');
+  p.bot = true;
+  p.mob = { type: key, dmg: pw.dmg, reward: def.reward + Math.floor(S.wave * 0.5), scale: def.scale, color: def.color };
+  p.mst = newMobState(def);
+  p.maxHp = Math.max(1, Math.round(def.hp * pw.hp)); p.hp = p.maxHp;
+  p.speedMul = def.speed * pw.speed * MOB_SPEED;
+  p.scale = def.scale;
+  p.weapon = def.weapon ?? KNIFE; p.loadout = [p.weapon];
+  p.x = at.x + (Math.random() - 0.5) * 3; p.z = at.z + (Math.random() - 0.5) * 3; p.y = 0;
+  p.yaw = Math.random() * Math.PI * 2;
+  p.alive = true; p.protectUntil = now + 300; p.hist = [];
+  room.players.set(id, p);
+  broadcast(room, { t: 'pjoin', p: publicPlayer(p) });
+}
+
+// Coup au corps à corps d'un monstre (le délai entre deux coups est réglé par le monstre)
+function mobMelee(room, m, t, now) {
+  const def = MOBS[m.mob.type];
+  if (now < m.nextAtk || now < t.protectUntil) return;
+  m.nextAtk = now + def.melee.cd;
+  broadcast(room, { t: 'shot', id: m.id, w: KNIFE, o: [r2(m.x), r2(m.y + 1.2), r2(m.z)], e: [[r2(t.x), r2(t.y + 1.0), r2(t.z)]] });
+  applyDamage(room, m, t, def.melee.dmg, false, KNIFE, now);
+}
+
+// Champ de flux : distance de chaque case au joueur vivant le plus proche (recalculé quand ils bougent)
+function ensureFlow(room, now, humans) {
+  const alive = humans.filter((h) => h.alive);
+  if (!alive.length) { room.flow = null; return; }
+  const key = alive.map((h) => `${Math.round(h.x / 2)},${Math.round(h.z / 2)}`).join('|');
+  if (!room.flow || (now - room.flowAt > 800 && key !== room.flowKey) || now - room.flowAt > 3000) {
+    room.flow = computeFlow(room.map, alive);
+    room.flowAt = now; room.flowKey = key;
+  }
+}
+
+function stepSurvival(room, now) {
+  const S = room.surv;
+  if (!S) return;
+  for (const p of [...room.players.values()]) if (p.mob && !p.alive) dropPlayer(room, p);   // les monstres morts disparaissent
+  if (room.state === 'ended') return;
+  const humans = [...room.players.values()].filter((p) => !p.bot && !p.away);
+  if (!humans.length) return;
+  const live = liveMobs(room);
+  if (S.phase === 'prep') {
+    if (now >= S.until) {                              // début de manche
+      S.wave++; S.phase = 'fight';
+      S.queue = waveList(S.wave, humans.length);
+      S.nextSpawn = now + 1200;
+      broadcast(room, survMsg(room));
+    }
+  } else {
+    if (S.queue.length && live < SURV.MAX_MOBS && now >= S.nextSpawn) {
+      spawnMob(room, S.queue.shift(), now);
+      S.nextSpawn = now + Math.max(250, 900 - S.wave * 25);
+    }
+    if (!S.queue.length && live === 0) {               // manche gagnée : prime, soins, retour des joueurs à terre
+      const bonus = SURV.WAVE_BONUS + 20 * S.wave;
+      for (const h of humans) {
+        h.cash += bonus; sendCash(h);
+        if (!h.alive) spawnPlayer(room, h, now); else h.hp = h.maxHp;
+      }
+      S.phase = 'prep'; S.until = now + SURV_T.prep;
+      broadcast(room, { t: 'wave', n: S.wave, bonus });
+      broadcast(room, survMsg(room));
+    } else if (humans.every((h) => !h.alive)) {        // tous à terre : fin de partie
+      room.state = 'ended'; room.winner = null; room.endAt = now + SURV_T.over;
+      broadcast(room, { t: 'state', s: 'ended', win: null, until: room.endAt, stats: statsMsg(room), wave: S.wave });
+      broadcast(room, survMsg(room));
+    }
+  }
+  if (now - S.lastSent > 500) { S.lastSent = now; broadcast(room, survMsg(room)); }
+  if (live) ensureFlow(room, now, humans);
+}
+
+// Achat à la boutique (survie) : arme, soins, grenades ou amélioration
+function handleBuy(p, m) {
+  const room = p.room;
+  if (room.mode !== 'survival' || room.state === 'ended' || p.mob) return;
+  const it = shopItem(String(m.id));
+  if (!it) return;
+  const fail = (why) => send(p, { t: 'buyfail', id: it.id, why });
+  const price = shopPrice(it, p.up);
+  if (p.cash < price) return fail('cash');
+  if (it.kind === 'weapon') {
+    if (p.owned.includes(it.w) || p.loadout.includes(it.w)) return fail('owned');
+    if (p.loadout.length >= 9) return fail('full');
+    p.owned.push(it.w); p.loadout.push(it.w);
+    send(p, { t: 'loadout', loadout: p.loadout });
+  } else if (it.kind === 'heal') {
+    if (!p.alive || p.hp >= p.maxHp) return fail('full');
+    p.hp = p.maxHp;
+  } else if (it.kind === 'nades') {
+    if (p.nades >= NADE_MAX) return fail('full');
+    p.nades = NADE_MAX; p.nadeRegenAt = 0;
+    send(p, { t: 'nades', n: p.nades });
+  } else if (it.kind === 'up') {
+    if ((p.up[it.stat] || 0) >= it.max) return fail('max');
+    p.up[it.stat]++;
+    if (it.stat === 'hp') { p.maxHp += 25; if (p.alive) p.hp += 25; }
+    else if (it.stat === 'spd') p.speedMul = 1 + 0.06 * p.up.spd;
+    else p.dmgMul = 1 + 0.15 * p.up.dmg;
+    send(p, { t: 'stats', maxHp: p.maxHp, speed: p.speedMul });
+  }
+  p.cash -= price;
+  sendCash(p);
+  send(p, { t: 'bought', id: it.id });
+}
+
 // ---- grenade à main (touche G) : lancée dans la direction visée, rebondit, explose après 2,4 s ----
 function handleNade(p, m, now) {
   const room = p.room;
@@ -772,7 +934,7 @@ function stepGas(room, now, dt) {
 
 // Série de kills : débloque une arme (touches 6, 7, 8), à un seul chargeur
 function awardStreak(room, p) {
-  if (p.bot || room.mode === 'gun') return;
+  if (p.bot || room.mode === 'gun' || room.mode === 'survival') return;
   const i = STREAKS.indexOf(p.streak);
   if (i < 0) return;
   const wi = STREAK_WEAPONS[i];
@@ -880,6 +1042,7 @@ function handleFire(p, m, now) {
 function applyDamage(room, atk, vic, amount, head, wi, now) {
   if (!vic.alive || room.state === 'ended') return;
   const suicide = atk === vic;
+  if (!suicide) amount *= atk.mob ? atk.mob.dmg : atk.dmgMul || 1;   // survie : force des monstres, amélioration de dégâts des joueurs
   if (!suicide) {
     const real = Math.min(amount, Math.max(0, vic.hp));
     atk.st.dmg += real;
@@ -898,13 +1061,14 @@ function applyDamage(room, atk, vic, amount, head, wi, now) {
   vic.hp = 0; vic.alive = false; vic.d++; vic.streak = 0;
   vic.chargeAt = 0;
   endPlane(room, vic.id, 'death');
-  vic.respawnAt = now + RESPAWN;
+  vic.respawnAt = room.mode === 'survival' ? 0 : now + RESPAWN;   // survie : on revient à la manche suivante
   if (suicide) { // mort par sa propre explosion : pas de frag
     broadcast(room, { t: 'kill', a: atk.id, v: vic.id, w: wi, h: 0 });
     broadcast(room, scoreMsg(room));
     return;
   }
   atk.k++; atk.streak++;
+  if (room.mode === 'survival' && vic.mob && !atk.mob) { atk.cash += vic.mob.reward; sendCash(atk); }
   atk.st.bestStreak = Math.max(atk.st.bestStreak, atk.streak);
   atk.st.byWeapon[wi] = (atk.st.byWeapon[wi] || 0) + 1;
   if (room.cfg.teams) room.teamKills[atk.team]++;
@@ -921,6 +1085,7 @@ function applyDamage(room, atk, vic, amount, head, wi, now) {
 }
 
 function checkWin(room, lastKiller, now) {
+  if (room.mode === 'survival') return;   // la survie n'a pas de vainqueur : elle finit quand tous les joueurs sont à terre
   const limit = room.killLimit;
   let winner = null;
   if (room.cfg.teams) {
@@ -975,9 +1140,11 @@ function handleMessage(ws, raw) {
       players: [...room.players.values()].map(publicPlayer),
       state: room.state, win: room.winner, until: room.endAt,
       teamKills: room.teamKills, back: returning,
+      surv: room.surv ? survMsg(room) : null,
       gas: room.gas ? { owner: room.gas.owner.id, ms: Math.max(0, room.gas.until - now) } : null,
       portals: [...room.portals].flatMap(([o, pair]) => pair.map((q, i) => q && { o, i, x: q.x, y: q.y, z: q.z, nx: q.nx, ny: q.ny, nz: q.nz }).filter(Boolean)),
     });
+    if (room.mode === 'survival') sendCash(p);
     if (returning) {
       spawnPlayer(room, p, now);
       broadcast(room, scoreMsg(room));
@@ -1025,6 +1192,8 @@ function handleMessage(ws, raw) {
     handleFire(p, m, now);
   } else if (m.t === 'nade') {
     handleNade(p, m, now);
+  } else if (m.t === 'buy') {
+    handleBuy(p, m);
   } else if (m.t === 'charge') { // début / annulation de la charge du canon à orbe
     if (p.alive && WEAPONS[p.weapon]?.charge && !(m.on && now < p.stunUntil)) {
       p.chargeAt = m.on ? now : 0;
@@ -1064,8 +1233,8 @@ setInterval(() => {
         spawnPlayer(room, p, now);
       }
       if (p.bot && p.alive && room.state === 'playing' && now >= p.stunUntil) {
-        const f = botStep(room, p, now, TICK_MS / 1000);
-        if (f) { if (f.nade) handleNade(p, f, now); else handleFire(p, f, now); }
+        const f = p.mob ? mobStep(room, p, now, TICK_MS / 1000) : botStep(room, p, now, TICK_MS / 1000);
+        if (f) { if (f.melee) mobMelee(room, p, f.melee, now); else if (f.nade) handleNade(p, f, now); else handleFire(p, f, now); }
       }
       if (p.alive && p.nades < NADE_MAX && p.nadeRegenAt && now >= p.nadeRegenAt && room.mode !== 'gun') {
         p.nades++;
@@ -1079,6 +1248,7 @@ setInterval(() => {
       }
       snap.push([p.id, r2(p.x), r2(p.y), r2(p.z), r2(p.yaw), r2(p.pitch), Math.ceil(p.hp), p.weapon, p.alive && now < p.protectUntil ? 1 : 0]);
     }
+    stepSurvival(room, now);
     stepProjectiles(room, now, TICK_MS / 1000);
     stepPlanes(room, now, TICK_MS / 1000);
     if (room.nuke && now >= room.nuke.at && room.state === 'playing') detonateNuke(room, now);

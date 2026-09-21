@@ -10,7 +10,7 @@ import { MAPS } from '../web/shared/map.js';
 
 const PORT = 7861;
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
-const srv = spawn('node', ['server/index.js'], { cwd: root, env: { ...process.env, PORT: String(PORT), KILL_LIMIT: '2', STREAKS: '1,2,3', RESPAWN_MS: '600', PROTECT_MS: '300', GRACE_MS: '1500' }, stdio: 'inherit' });
+const srv = spawn('node', ['server/index.js'], { cwd: root, env: { ...process.env, PORT: String(PORT), KILL_LIMIT: '2', STREAKS: '1,2,3', SURV_FIRST_PREP_MS: '1500', SURV_PREP_MS: '2500', SURV_OVER_MS: '2500', SURV_START_CASH: '1000', SURV_MOB_SPEED: '3', RESPAWN_MS: '600', PROTECT_MS: '300', GRACE_MS: '1500' }, stdio: 'inherit' });
 process.on('exit', () => srv.kill());
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -648,6 +648,84 @@ async function main() {
       check('minigun : plus de 15 balles/s, la cible est tuée', B.has('kill', (m) => m.v === B.id));
       await closeAll(A, B);
     }
+  }
+
+  // ---------- SURVIE ----------
+  console.log('\n[survie]');
+  {
+    const A = new Bot('Surv');
+    await A.connect(); A.join('survival', 'svA', 0, { map: 'arena' });
+    const w = await A.waitFor('welcome'); A.id = w.id;
+    const sp = await A.waitFor('spawn');
+    check('survie : salon en préparation, aucun monstre au départ', w.room.mode === 'survival' && w.surv?.phase === 'prep' && w.players.every((p) => !p.mob), JSON.stringify(w.surv));
+    check('survie : équipement de départ = revolver + couteau', sp.loadout.join() === '3,4', JSON.stringify(sp.loadout));
+    const c0 = await A.waitFor('cash', null, 1500).catch(() => null);
+    check('survie : argent de départ annoncé', c0?.n === 1000, JSON.stringify(c0));
+    // boutique
+    A.send({ t: 'buy', id: 'w-shotgun' });
+    const bought = await A.waitFor('bought', (m) => m.id === 'w-shotgun', 1500).catch(() => null);
+    const lo = A.log.filter((m) => m.t === 'loadout').at(-1);
+    check('boutique : arme achetée et ajoutée à l\'équipement', !!bought && !!lo && lo.loadout.includes(W.SHOTGUN), JSON.stringify(lo));
+    check('boutique : l\'argent est débité (1000 − 300)', A.log.filter((m) => m.t === 'cash').at(-1)?.n === 700);
+    A.send({ t: 'buy', id: 'w-shotgun' }); A.send({ t: 'buy', id: 'heal' }); A.send({ t: 'buy', id: 'w-orb' });
+    await sleep(300);
+    const why = (id) => A.log.find((m) => m.t === 'buyfail' && m.id === id)?.why;
+    check('boutique : refus (déjà acheté / vie pleine / pas assez d\'argent)', why('w-shotgun') === 'owned' && why('heal') === 'full' && why('w-orb') === 'cash', `${why('w-shotgun')} ${why('heal')} ${why('w-orb')}`);
+    A.send({ t: 'buy', id: 'hp' });
+    const st = await A.waitFor('stats', null, 1500).catch(() => null);
+    await sleep(200);
+    check('boutique : +25 PV max', st?.maxHp === 125 && A.log.filter((m) => m.t === 'cash').at(-1)?.n === 450, JSON.stringify(st));
+
+    // manche 1 : des zombies apparaissent
+    const s1 = await A.waitFor('surv', (m) => m.phase === 'fight' && m.wave === 1, 5000).catch(() => null);
+    check('survie : la manche 1 démarre après la préparation', !!s1 && s1.left > 0, JSON.stringify(s1));
+    const mj = await A.waitFor('pjoin', (m) => !!m.p.mob, 5000).catch(() => null);
+    check('survie : monstres de l\'équipe rouge (zombie 60 PV à la manche 1)', !!mj && mj.p.team === 'red' && mj.p.mob.t === 'zombie' && mj.p.mob.max === 60, JSON.stringify(mj));
+    const mobIds = () => new Set(A.log.filter((m) => m.t === 'pjoin' && m.p.mob).map((m) => m.p.id));
+    // on en tue un : le tueur gagne des points
+    const cashBefore = A.log.filter((m) => m.t === 'cash').at(-1).n;
+    const t0 = Date.now(); let lastFire = 0;
+    while (Date.now() - t0 < 30000 && !A.has('kill', (m) => mobIds().has(m.v) && m.a === A.id)) {
+      A.pos(0, 0, 12, 0, W.SHOTGUN);   // au sud de la plateforme centrale : accessible aux monstres
+      const ids = mobIds();
+      const near = (A.lastSnap?.p || []).filter((e) => ids.has(e[0]) && e[6] > 0).sort((a, b) => Math.hypot(a[1], a[3] - 12) - Math.hypot(b[1], b[3] - 12))[0];
+      if (near && Date.now() - lastFire > 950) {
+        const d = [near[1], near[2] + 1.0 - 1.6, near[3] - 12], l = Math.hypot(...d);
+        A.fire(W.SHOTGUN, [0, 1.6, 12], d.map((v) => v / l), { seed: (Date.now() & 0xffff) });
+        lastFire = Date.now();
+      }
+      await sleep(100);
+    }
+    await sleep(300);
+    const killed = A.has('kill', (m) => mobIds().has(m.v) && m.a === A.id);
+    check('survie : un monstre tué', killed);
+    const cashAfter = A.log.filter((m) => m.t === 'cash').at(-1).n;
+    check('survie : le tueur gagne des points (récompense du monstre)', cashAfter >= cashBefore + 10, `${cashBefore} -> ${cashAfter}`);
+    check('survie : le monstre mort disparaît de la partie', A.has('pleave', (m) => m.id === A.log.find((k) => k.t === 'kill' && mobIds().has(k.v))?.v));
+
+    A.pos(0, 0, 12, 0, W.SHOTGUN);
+    // plus personne ne se défend : les monstres finissent par gagner -> fin de partie, puis nouvelle partie à la manche 1
+    const end = await A.waitFor('state', (m) => m.s === 'ended', 40000).catch(() => null);
+    check('survie : tous à terre = fin de partie avec statistiques et manche atteinte', !!end && end.wave >= 1 && !!end.stats && end.stats.rows.length === 1, JSON.stringify(end));
+    const again = await A.waitFor('state', (m) => m.s === 'playing' && A.log.indexOf(m) > A.log.indexOf(end), 8000).catch(() => null);
+    check('survie : la partie recommence', !!again);
+    await sleep(300);
+    const sv = A.log.filter((m) => m.t === 'surv').at(-1);
+    check('survie : retour à la manche 0 en préparation, argent et achats remis à zéro', sv?.wave === 0 && sv?.phase === 'prep' && A.log.filter((m) => m.t === 'cash').at(-1)?.n === 1000 && A.log.filter((m) => m.t === 'cash').at(-1)?.owned.length === 0, JSON.stringify(sv));
+    A.ws.close();
+
+    // coop : deux joueurs dans la même équipe, sans tir allié
+    const C1 = new Bot('Coop1'), C2 = new Bot('Coop2');
+    await C1.connect(); C1.join('survival', 'svB', 0, { map: 'arena' }); const wc1 = await C1.waitFor('welcome'); await C1.waitFor('spawn');
+    await C2.connect(); C2.join('survival', 'svB', 0, { map: 'arena' }); const wc2 = await C2.waitFor('welcome'); await C2.waitFor('spawn');
+    check('coop : les deux joueurs sont dans la même équipe et le même salon', wc1.team === 'blue' && wc2.team === 'blue' && wc1.room.id === wc2.room.id, `${wc1.team} ${wc2.team}`);
+    await sleep(450);
+    C1.pos(-15, 0, -25, Math.PI, 3); C2.pos(-15, 0, -20, Math.PI, 3); await sleep(300);
+    C1.fire(3, [-15, 1.6, -25], [0, -0.05, 1]);
+    await sleep(400);
+    check('coop : pas de tir allié', !C2.has('dmg') && !C1.has('hit'));
+    C1.ws.close(); C2.ws.close();
+    await sleep(300);
   }
 
   // ---------- GUN GAME ----------

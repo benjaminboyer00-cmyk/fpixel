@@ -1,7 +1,7 @@
 // Boucle de jeu : joueur local (prédit côté client), autres joueurs (interpolés), tirs, effets, HUD.
 import * as THREE from 'three';
 import {
-  TICK_MS, INTERP_MS, MIN_INTERP_MS, MAX_EXTRAP_MS, EYE_HEIGHT, MAX_HP, RESPAWN_MS, WALK_SPEED, JUMP_SPEED, WEAPONS, GUN_ORDER, KNIFE, resolveClass, STREAK_WEAPONS,
+  TICK_MS, INTERP_MS, MIN_INTERP_MS, MAX_EXTRAP_MS, MODES, EYE_HEIGHT, MAX_HP, RESPAWN_MS, WALK_SPEED, JUMP_SPEED, WEAPONS, GUN_ORDER, KNIFE, resolveClass, STREAK_WEAPONS,
 } from '../shared/config.js';
 import { mapById } from '../shared/map.js';
 import { mulberry32, applySpread, lookDir, clamp, angleLerp, rayAABB } from '../shared/util.js';
@@ -53,6 +53,7 @@ export class Game {
     this.interp = INTERP_MS;    // retard d'affichage des autres joueurs (ms), ajusté à la gigue du réseau
     this._jit = 0; this._lastSnapAt = 0; this._predAt = 0;
     this.mvp = null; this.onMatchEnd = null;
+    this.surv = null; this.endWave = 0; this.onShop = null; this.onShopChange = null;   // mode survie
     this.nukeAt = 0;            // heure d'impact du missile nucléaire en vol
     this.gas = null;            // gaz toxique : { owner, until }
     this.running = false;
@@ -127,7 +128,7 @@ export class Game {
     const loadout = this.gun ? [GUN_ORDER[level], KNIFE] : resolveClass(s0.cls, s0.custom).weapons.slice();
     this.me = {
       x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, onGround: true, yaw: 0, pitch: 0,
-      level, loadout, maxHp: MAX_HP, speedMul: 1, nades: 0, nadeReady: 0, charging: false, chargeAt: 0, flight: null, lastPc: 0, preYaw: 0, prePitch: 0, pull: null, portalUntil: 0, stunUntil: 0, altUntil: {}, jumpPrev: false,
+      level, loadout, maxHp: MAX_HP, speedMul: 1, nades: 0, nadeReady: 0, cash: 0, up: { hp: 0, dmg: 0, spd: 0 }, charging: false, chargeAt: 0, flight: null, lastPc: 0, preYaw: 0, prePitch: 0, pull: null, portalUntil: 0, stunUntil: 0, altUntil: {}, jumpPrev: false,
       hp: MAX_HP, alive: false, spawned: false, weapon: loadout[0], ammo: WEAPONS.map((w) => w.mag),
       reloadUntil: 0, nextFire: 0, switchUntil: 0, scoped: false, scopeToggle: false,
       respawnAt: 0, killer: null, deadT: 0, prot: 0, lastSend: 0,
@@ -141,6 +142,7 @@ export class Game {
     this.viewmodel.setWeapon(this.me.weapon);
     this.hud.setLoadout(loadout);
     this.hud.setStats(null);
+    this.surv = welcome.surv || null; this.endWave = 0;
     this.fov = 0;
     this._applyFov(true);
     this.scoreDirty = true;
@@ -156,6 +158,7 @@ export class Game {
       ? 'Joystick : bouger · glisser à droite : viser · le tir est automatique sur un ennemi'
       : 'F / Entrée : tirer · Flèches : viser · 1-9 : armes · E / clic droit : tir secondaire · M : mini-carte', 10000);
     document.body.classList.add('ingame');
+    document.body.classList.toggle('survival', this.mode === 'survival');
     this._raf = requestAnimationFrame((t) => this._frame(t));
   }
 
@@ -172,7 +175,7 @@ export class Game {
     this.minimap.clear();
     this.input.enabled = false;
     this.input.reset();
-    document.body.classList.remove('ingame');
+    document.body.classList.remove('ingame', 'survival');
     this.hud.hide();
     document.getElementById('scope').classList.add('hidden');
     document.body.classList.remove('scoped');
@@ -188,16 +191,26 @@ export class Game {
   _addPlayer(info) {
     let p = this.players.get(info.id);
     if (p) return p;
-    const color = playerColor(this.mode, info);
+    const color = info.mob ? info.mob.c : playerColor(this.mode, info);
     const model = buildPlayer(color);
     model.group.visible = false;
+    if (info.mob) model.group.scale.setScalar(info.mob.s);
     this.scene.add(model.group);
     p = {
       id: info.id, name: info.name, team: info.team, bot: !!info.bot, k: info.k || 0, d: info.d || 0, lvl: info.lvl || 0,
       hp: info.hp ?? 0, weapon: info.w ?? 0, prot: 0, snaps: [], model, sprite: null, lastX: 0, lastZ: 0, walk: 0,
     };
     // Nom au-dessus de la tête : seulement les coéquipiers en mode équipes (pas de "wallhack")
-    if (info.id !== this.myId && this.mode === 'tdm' && info.team === this.myTeam()) {
+    if (info.mob) { // barre de vie flottante des monstres
+      const bg = new THREE.Sprite(new THREE.SpriteMaterial({ color: 0x000000, transparent: true, opacity: 0.6, fog: false }));
+      const fill = new THREE.Sprite(new THREE.SpriteMaterial({ color: 0xe5484d, transparent: true, fog: false }));
+      bg.scale.set(1.0, 0.13, 1); fill.scale.set(0.96, 0.09, 1);
+      bg.position.set(0, 2.3, 0); fill.position.set(0, 2.3, 0);
+      bg.renderOrder = 1; fill.renderOrder = 2;
+      model.group.add(bg, fill);
+      p.mob = info.mob; p.hpFill = fill;
+    }
+    if (info.id !== this.myId && MODES[this.mode]?.teams && info.team === this.myTeam()) {
       p.sprite = makeNameSprite(info.name, color);
       model.group.add(p.sprite);
     }
@@ -277,6 +290,22 @@ export class Game {
     });
     n.on('pbounce', (m) => this.fx.bounceProj(m.id, m.o, m.v));
     n.on('nades', (m) => { if (this.me) this.me.nades = m.n; });
+    // ---- survie ----
+    n.on('surv', (m) => {
+      const prev = this.surv;
+      this.surv = m;
+      if (prev && m.wave > prev.wave && m.phase === 'fight') { this.hud.hint(`MANCHE ${m.wave} !`, 3500); sfx.play('streak'); }
+    });
+    n.on('wave', (m) => { this.hud.hint(`Manche ${m.n} terminée ! +${m.bonus} 💰 · B : boutique`, 6000); sfx.play('win'); });
+    n.on('cash', (m) => {
+      const me = this.me;
+      if (!me) return;
+      me.cash = m.n; if (m.up) me.up = m.up;
+      this.onShopChange?.();
+    });
+    n.on('stats', (m) => { if (this.me) { this.me.maxHp = m.maxHp; this.me.speedMul = m.speed; } });
+    n.on('buyfail', (m) => this.hud.hint(m.why === 'cash' ? 'Pas assez de points' : m.why === 'owned' ? 'Tu l\'as déjà' : m.why === 'full' ? 'Rien à faire ici (déjà au maximum)' : 'Achat impossible', 2000));
+    n.on('bought', () => sfx.play('spawn'));
     n.on('charge', (m) => { const p = this.players.get(m.id); if (p) p.charging = !!m.on; });   // canon à orbe : lueur pendant la charge
     n.on('planeOn', (m) => { // on prend les commandes de l'avion en papier
       const me = this.me;
@@ -385,6 +414,7 @@ export class Game {
         const w = m.win;
         const mine = w && (w.team ? w.team === this.myTeam() : w.id === this.myId);
         if (mine) sfx.play('win');
+        if (m.wave !== undefined) this.endWave = m.wave;
         if (m.stats) {
           this.hud.setStats(m.stats.rows, m.stats.mvp);
           this.mvp = m.stats.mvp;
@@ -531,7 +561,7 @@ export class Game {
       const slot = inp.takeWeapon();
       let want;
       if (slot !== null) {
-        if (slot >= 5) { const sw = STREAK_WEAPONS[slot - 5]; want = me.loadout.includes(sw) ? sw : undefined; }   // touches 6-8 : armes de série
+        if (slot >= 5 && this.mode !== 'survival') { const sw = STREAK_WEAPONS[slot - 5]; want = me.loadout.includes(sw) ? sw : undefined; }   // touches 6-8 : armes de série
         else { const c = me.loadout[slot]; want = WEAPONS[c]?.streak === undefined ? c : undefined; }
       }
       const cyc = inp.takeCycle();
@@ -541,6 +571,7 @@ export class Game {
       // --- rechargement ---
       if (inp.takeReload()) this._startReload(now);
       if (inp.takeNade()) this._throwNade(now);
+      if (inp.takeShop() && this.mode === 'survival') this.onShop?.();
 
       // --- zoom sniper ---
       if (inp.takeScopeToggle()) me.scopeToggle = !me.scopeToggle;
@@ -640,7 +671,7 @@ export class Game {
     let best = 0;
     for (const p of this.players.values()) {
       if (p.id === this.myId || p.hp <= 0 || p.prot || !p.snaps.length || !p.model.group.visible) continue;
-      if (this.mode === 'tdm' && p.team === this.myTeam()) continue;
+      if (MODES[this.mode]?.teams && p.team === this.myTeam()) continue;
       const g = p.model.group.position;
       const body = rayAABB(ex, ey, ez, dx, dy, dz, g.x - 0.35, g.y, g.z - 0.35, g.x + 0.35, g.y + 1.4, g.z + 0.35, reach);
       const head = rayAABB(ex, ey, ez, dx, dy, dz, g.x - 0.25, g.y + 1.4, g.z - 0.25, g.x + 0.25, g.y + 1.85, g.z + 0.25, reach);
@@ -662,7 +693,7 @@ export class Game {
     const pad = 0.12;
     for (const p of this.players.values()) {
       if (p.id === this.myId || p.hp <= 0 || p.prot || !p.snaps.length) continue;
-      if (this.mode === 'tdm' && p.team === this.myTeam()) continue;
+      if (MODES[this.mode]?.teams && p.team === this.myTeam()) continue;
       const g = p.model.group.position;
       const body = rayAABB(ex, ey, ez, dx, dy, dz, g.x - 0.35 - pad, g.y, g.z - 0.35 - pad, g.x + 0.35 + pad, g.y + 1.4, g.z + 0.35 + pad, reach);
       const head = rayAABB(ex, ey, ez, dx, dy, dz, g.x - 0.25 - pad, g.y + 1.4, g.z - 0.25 - pad, g.x + 0.25 + pad, g.y + 1.85, g.z + 0.25 + pad, reach);
@@ -922,6 +953,7 @@ export class Game {
       p.model.head.rotation.x = clamp(pitch, -1.2, 1.2);
       p.model.setWeapon(WEAPONS[p.weapon]?.id ?? 'ar');
 
+      if (p.hpFill) { const f = clamp(p.hp / p.mob.max, 0, 1); p.hpFill.scale.x = 0.96 * f + 1e-4; p.hpFill.position.x = -0.48 * (1 - f); }
       if (p.charging) this.fx.burst(g.position.x, g.position.y + 1.3, g.position.z, '#c040ff', 1, 1.6, 0.4);
 
       // animation de marche
@@ -984,6 +1016,7 @@ export class Game {
     if (st === 'ended') {
       const w = this.winner;
       let title = 'Fin de manche';
+      if (this.mode === 'survival') return this.hud.banner(`FIN DE PARTIE — manche ${this.endWave}`, `${this.mvp != null ? `MVP : ${this._name(this.mvp)} · ` : ''}Nouvelle partie dans ${Math.max(0, Math.ceil((this.until - this.net.serverNow()) / 1000))}s`);
       if (w?.team) title = `L'équipe ${w.team === 'red' ? 'ROUGE' : 'BLEUE'} gagne !`;
       else if (w) title = w.id === this.myId ? 'VICTOIRE !' : `${this._name(w.id)} gagne !`;
       const left = Math.max(0, Math.ceil((this.until - this.net.serverNow()) / 1000));
@@ -996,6 +1029,7 @@ export class Game {
     const me = this.me;
     this.hud.setHp(me.alive ? me.hp : 0, me.maxHp);
     this.hud.setNades(me.nades, !this.gun);
+    if (this.mode === 'survival') this.hud.survLine(this.surv, me.cash, this.surv ? Math.max(0, Math.ceil((this.surv.until - this.net.serverNow()) / 1000)) : 0);
     this.hud.setWeapon(me.weapon, me.ammo[me.weapon], !!me.reloadUntil);
     const cw = WEAPONS[me.weapon];
     let special = '';
@@ -1015,7 +1049,7 @@ export class Game {
 
     if (!me.alive && me.spawned && this.state !== 'ended') {
       const left = Math.max(0, Math.ceil((me.respawnAt - now) / 1000));
-      this.hud.death(true, me.killer ? this._name(me.killer) : '', left);
+      this.hud.death(true, me.killer ? this._name(me.killer) : '', this.mode === 'survival' ? -1 : left);
     } else if (!me.alive) {
       this.hud.death(false);
     }
@@ -1031,10 +1065,10 @@ export class Game {
     this.minimap.setVisible(s.minimap !== false);
     if (s.minimap !== false) this.minimap.draw(this, now);
 
-    const list = () => [...this.players.values()];
+    const list = () => [...this.players.values()].filter((p) => !p.mob);
     if (this.scoreDirty) {
       this.scoreDirty = false;
-      this.hud.scoreLine(this.mode, list(), this.teamKills, this.myId, this.limit);
+      if (this.mode !== 'survival') this.hud.scoreLine(this.mode, list(), this.teamKills, this.myId, this.limit);
     }
     const showBoard = this.input.scoreHeld || this.state === 'ended';
     this.hud.showScoreboard(showBoard);

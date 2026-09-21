@@ -241,4 +241,86 @@ function buildWarehouse() {
   };
 }
 
-export const MAPS = { arena: buildArena(), village: buildVillage(), warehouse: buildWarehouse() };
+// ---------------------------------------------------------------- Quartier (très grande, multi ou survie) ----
+function buildCity() {
+  const half = 64;
+  const { boxes, add, span, mirror4, enclose, wall } = builder(half);
+  enclose(6, 'concrete');
+  const interiors = [];
+  const DOOR = 1.8, WIN = 1.4;
+
+  // Immeuble (une pièce, hauteur 3,4) : portes sur les faces indiquées ('n' z-, 's' z+, 'w' x-, 'e' x+), fenêtres, toit
+  function building(cx, cz, w, d, doors, c = 'brick') {
+    const x0 = cx - w / 2, x1 = cx + w / 2, z0 = cz - d / 2, z1 = cz + d / 2, h = 3.4;
+    const openings = (len, mid, door) => {
+      const holes = [];
+      if (door) holes.push({ a: mid - DOOR / 2, b: mid + DOOR / 2, y0: 0, y1: 2.4 });
+      for (const f of [-0.3, 0.3]) {
+        const m = mid + f * len;
+        if (!door || Math.abs(f * len) > DOOR / 2 + WIN) holes.push({ a: m - WIN / 2, b: m + WIN / 2, y0: 1.0, y1: 2.0 });
+      }
+      return holes;
+    };
+    wall('x', z0, x0, x1, h, openings(w, cx, doors.includes('n')), c);
+    wall('x', z1, x0, x1, h, openings(w, cx, doors.includes('s')), c);
+    wall('z', x0, z0, z1, h, openings(d, cz, doors.includes('w')), c);
+    wall('z', x1, z0, z1, h, openings(d, cz, doors.includes('e')), c);
+    span(x0 - 0.3, x1 + 0.3, z0 - 0.3, z1 + 0.3, h, h + 0.35, 'roof');
+    add(cx, cz, 1.8, 0.9, 0.85, 0, 'wood');           // table
+    interiors.push({ x0, x1, z0, z1 });
+  }
+
+  for (const sx of [1, -1]) {
+    for (const sz of [1, -1]) {
+      building(sx * 24, sz * 24, 14, 12, [sz > 0 ? 'n' : 's', sx > 0 ? 'w' : 'e'], 'brick');
+      building(sx * 48, sz * 24, 12, 14, [sx > 0 ? 'w' : 'e', sz > 0 ? 'n' : 's'], 'plaster');
+      building(sx * 24, sz * 48, 14, 10, [sz > 0 ? 'n' : 's'], 'brickDark');
+      building(sx * 48, sz * 48, 12, 12, [sx > 0 ? 'w' : 'e'], 'concrete');
+    }
+  }
+  for (const s of [1, -1]) {
+    building(s * 42, 0, 12, 16, [s > 0 ? 'w' : 'e', 'n', 's'], 'brick');
+    building(0, s * 41, 16, 12, [s > 0 ? 'n' : 's', 'w', 'e'], 'plaster');
+  }
+
+  // Place centrale : monument, murets, buissons
+  add(0, 0, 6, 6, 1.0, 0, 'stone');
+  add(0, 0, 2, 2, 2.6, 1.0, 'stone');
+  mirror4(8, 8, 3, 0.6, 1.0, 0, 'low');
+  mirror4(13, 13, 2.4, 2.4, 1.3, 0, 'bush');
+
+  // Voitures abandonnées, barricades, caisses (pour se couvrir dans les rues)
+  mirror4(9, 14, 4.2, 1.9, 1.5, 0, 'metal');
+  mirror4(14, 7, 1.9, 4.2, 1.5, 0, 'metal');
+  mirror4(36, 11, 4.2, 1.9, 1.5, 0, 'metal');
+  mirror4(11, 34, 1.9, 4.2, 1.5, 0, 'metal');
+  mirror4(36, 36, 4, 0.6, 1.0, 0, 'concrete');
+  mirror4(36, 30, 0.6, 4, 1.0, 0, 'concrete');
+  mirror4(30, 36, 0.6, 4, 1.0, 0, 'concrete');
+  mirror4(58, 12, 1.6, 1.6, 1.6, 0, 'crate');
+  mirror4(12, 52, 1.6, 1.6, 1.6, 0, 'crateDark');
+  mirror4(58, 36, 2.4, 2.4, 1.3, 0, 'bush');
+  mirror4(36, 58, 2.4, 2.4, 1.3, 0, 'bush');
+  mirror4(20, 4, 1.2, 1.2, 4.5, 0, 'pillar');
+
+  const spawns = [];
+  for (const x of [-24, -12, 0, 12, 24]) {
+    spawns.push({ x, z: -58, yaw: Math.PI, team: 'red' });
+    spawns.push({ x, z: 58, yaw: 0, team: 'blue' });
+  }
+  for (const sx of [1, -1]) {
+    for (const sz of [1, -1]) spawns.push({ x: sx * 58, z: sz * 30, yaw: sx > 0 ? Math.PI / 2 : -Math.PI / 2, team: null });
+  }
+  // Points d'apparition des monstres en survie : tout le pourtour
+  const mobSpawns = [
+    [-58, -58], [58, -58], [-58, 58], [58, 58], [-58, 0], [58, 0], [0, -58], [-30, -58], [30, -58], [-58, -30], [58, -30], [-58, 30], [58, 30],
+  ].map(([x, z]) => ({ x, z }));
+
+  return {
+    id: 'city', name: 'Quartier', desc: 'Très grande carte : rues, immeubles et place centrale (multi et survie)',
+    half, boxes, spawns, mobSpawns, interiors,
+    sky: '#a9c4dd', fog: [60, 170], floor: '#6b6e75',
+  };
+}
+
+export const MAPS = { arena: buildArena(), village: buildVillage(), warehouse: buildWarehouse(), city: buildCity() };

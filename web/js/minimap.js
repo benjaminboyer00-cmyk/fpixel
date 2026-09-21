@@ -1,7 +1,7 @@
 // Mini-carte : toute l'arène vue de dessus (haut = côté rouge).
 // Montre TOUJOURS les coéquipiers, et les joueurs qui tirent (un anneau pendant 2 s à l'endroit du tir).
 // Les ennemis qui ne tirent pas restent invisibles : ce n'est pas un wallhack.
-import { TEAM_COLORS } from '../shared/config.js';
+import { TEAM_COLORS, MODES } from '../shared/config.js';
 import { playerColor } from './hud.js';
 
 const BOX_COLORS = {
@@ -81,7 +81,7 @@ export class Minimap {
 
     // coéquipiers (toujours visibles)
     let allies = 0;
-    if (game.mode === 'tdm') {
+    if (MODES[game.mode]?.teams && game.mode !== 'survival' || game.mode === 'survival') {
       for (const p of game.players.values()) {
         if (p.id === game.myId || p.team !== game.teamName || p.hp <= 0 || !p.snaps.length) continue;
         const pos = p.model.group.position;
