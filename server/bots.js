@@ -31,7 +31,7 @@ function navFor(map) {
 // Réglages par difficulté. err = imprécision de visée (rad), turn = vitesse de rotation (rad/s),
 // react = temps de réaction (ms), head = chance de viser la tête, pause = pause entre rafales (ms).
 export const DIFFS = {
-  easy:   { skill: [0.35, 0.5], react: [800, 1100], err: [0.08, 0.09],   turn: [1.8, 2.4], head: 0,    pause: [500, 1000], sight: 45, speed: 0.75, tol: 0.12 },
+  easy:   { skill: [0.25, 0.4], react: [1400, 2000], err: [0.2, 0.26],   turn: [0.9, 1.3], head: 0,    pause: [1200, 2500], sight: 30, speed: 0.55, tol: 0.16, burst: [1, 2] },
   normal: { skill: [0.65, 1.0], react: [350, 600],  err: null,           turn: null,       head: 0.3,  pause: [300, 800],  sight: 70, speed: 0.85, tol: 0.09 },
   hard:   { skill: [0.9, 1.0],  react: [150, 300],  err: [0.012, 0.02],  turn: [7, 8.5],   head: 0.55, pause: [150, 400],  sight: 95, speed: 0.95, tol: 0.06 },
 };
@@ -46,10 +46,10 @@ export function newBotAI(diff = 'normal') {
     err: D.err ? r(D.err[0], D.err[1]) : 0.06 - 0.035 * skill,
     maxTurn: D.turn ? r(D.turn[0], D.turn[1]) : 2.5 + 3 * skill,
     headChance: diff === 'normal' ? D.head * skill : D.head,
-    pauseRange: D.pause, sight: D.sight, speedMul: D.speed, tol: D.tol,
+    pauseRange: D.pause, burstRange: D.burst || [3, 7], sight: D.sight, speedMul: D.speed, tol: D.tol,
     target: null, seenAt: 0, nextScan: 0,
     wp: null, lastPos: { x: 0, z: 0 }, lastCheck: 0,
-    strafe: 1, strafeUntil: 0, mid: 0, aimHead: false, burstLeft: 4, pause: 0,
+    strafe: 1, strafeUntil: 0, mid: 0, aimHead: false, burstLeft: D.burst ? D.burst[1] : 4, pause: 0,
   };
 }
 
@@ -178,7 +178,8 @@ export function botStep(room, b, now, dt) {
       };
       if (w.auto && --ai.burstLeft <= 0) {        // rafales : quelques balles puis une pause
         ai.pause = now + ai.pauseRange[0] + Math.random() * (ai.pauseRange[1] - ai.pauseRange[0]);
-        ai.burstLeft = 3 + ((Math.random() * 5) | 0);
+        const [b0, b1] = ai.burstRange;
+        ai.burstLeft = b0 + ((Math.random() * (b1 - b0 + 1)) | 0);
       }
     }
   }
