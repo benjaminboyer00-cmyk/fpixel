@@ -674,9 +674,55 @@ export class Game {
   // ---- portails : traverser l'un ressort par l'autre, en gardant sa vitesse ----
   _setPortal(q) {
     const pair = this.portals.get(q.o) || [null, null];
-    pair[q.i] = { x: q.x, y: q.y, z: q.z, nx: q.nx, nz: q.nz };
+    pair[q.i] = { x: q.x, y: q.y, z: q.z, nx: q.nx, ny: q.ny || 0, nz: q.nz };
     this.portals.set(q.o, pair);
-    this.fx.setPortal(`${q.o}:${q.i}`, q.i, q.x, q.y, q.z, q.nx, q.nz);
+    this.fx.setPortal(`${q.o}:${q.i}`, q.i, q.x, q.y, q.z, q.nx, q.nz, q.ny || 0);
+  }
+
+  // Le joueur est-il en train d'entrer dans ce portail ?
+  _inPortal(A, wx, wz) {
+    const me = this.me;
+    if (A.ny > 0) { // sol : on marche dessus ou on tombe dedans
+      return Math.abs(me.x - A.x) < 0.65 && Math.abs(me.z - A.z) < 0.65 && me.y <= A.y + 0.1 && me.y >= A.y - 0.8 && me.vy <= 0.5;
+    }
+    if (A.ny < 0) { // plafond : on saute / on monte dedans
+      const head = me.y + 1.8;
+      return Math.abs(me.x - A.x) < 0.65 && Math.abs(me.z - A.z) < 0.65 && head >= A.y - 0.1 && head <= A.y + 0.8 && me.vy > 0.5;
+    }
+    const rx = me.x - A.x, rz = me.z - A.z;
+    const depth = rx * A.nx + rz * A.nz;               // distance devant le portail
+    const lateral = -rx * A.nz + rz * A.nx;            // décalage le long du portail
+    if (depth < -0.15 || depth > 0.55 || Math.abs(lateral) > 0.55 || Math.abs(me.y + 0.9 - A.y) > 1.0) return false;
+    return wx * A.nx + wz * A.nz < -0.2 || me.vx * A.nx + me.vz * A.nz < -1;
+  }
+
+  // Traversée : on ressort par l'autre portail en gardant sa vitesse (tomber dans un portail de sol = être propulsé par la sortie)
+  _teleport(A, B, now) {
+    const me = this.me;
+    const speed = Math.hypot(me.vx, me.vy, me.vz);
+    if (B.ny !== 0) {                                  // sortie au sol / au plafond
+      const up = B.ny > 0, s = Math.max(speed, 7.5);
+      me.x = B.x; me.z = B.z;
+      me.y = up ? B.y : B.y - 1.85;
+      me.vy = up ? s : -s;
+      if (A.ny === 0) { me.vx *= 0.3; me.vz *= 0.3; } else { me.vx *= 0.6; me.vz *= 0.6; }
+    } else if (A.ny !== 0) {                           // du sol / plafond vers un mur : projeté horizontalement
+      const yaw = Math.atan2(-B.nx, -B.nz), k = Math.max(speed, 6);
+      me.x = B.x + B.nx * 0.9; me.z = B.z + B.nz * 0.9; me.y = B.y - 1.0 + 0.01;
+      me.vx = B.nx * k; me.vz = B.nz * k; me.vy = 0;
+      me.yaw = yaw;
+    } else {                                           // mur -> mur : la vue tourne pour ressortir dans le bon sens
+      const dYaw = Math.atan2(-B.nx, -B.nz) - Math.atan2(A.nx, A.nz);
+      const sp = Math.hypot(me.vx, me.vz);
+      const ang = Math.atan2(-me.vx, -me.vz) + dYaw;
+      me.x = B.x + B.nx * 0.9; me.z = B.z + B.nz * 0.9; me.y = B.y - 1.0 + 0.01;
+      if (sp < 1) { me.vx = B.nx * 4.5; me.vz = B.nz * 4.5; }
+      else { const k = Math.max(sp, 4.5); me.vx = -Math.sin(ang) * k; me.vz = -Math.cos(ang) * k; }
+      me.yaw += dYaw;
+    }
+    me.onGround = false;
+    me.portalUntil = now + 700;
+    sfx.play('portal');
   }
 
   _checkPortals(now, wx, wz) {
@@ -685,22 +731,8 @@ export class Game {
     for (const pair of this.portals.values()) {
       if (!pair[0] || !pair[1]) continue;
       for (let i = 0; i < 2; i++) {
-        const A = pair[i], B = pair[1 - i];
-        const rx = me.x - A.x, rz = me.z - A.z;
-        const depth = rx * A.nx + rz * A.nz;               // distance devant le portail
-        const lateral = -rx * A.nz + rz * A.nx;            // décalage le long du portail
-        if (depth < -0.15 || depth > 0.55 || Math.abs(lateral) > 0.55 || Math.abs(me.y + 0.9 - A.y) > 1.0) continue;
-        const toward = wx * A.nx + wz * A.nz < -0.2 || me.vx * A.nx + me.vz * A.nz < -1;
-        if (!toward) continue;
-        const dYaw = Math.atan2(-B.nx, -B.nz) - Math.atan2(A.nx, A.nz);
-        const sp = Math.hypot(me.vx, me.vz);
-        const ang = Math.atan2(-me.vx, -me.vz) + dYaw;
-        me.x = B.x + B.nx * 0.9; me.z = B.z + B.nz * 0.9; me.y = B.y - 1.0 + 0.01;
-        if (sp < 1) { me.vx = B.nx * 4.5; me.vz = B.nz * 4.5; }
-        else { const k = Math.max(sp, 4.5); me.vx = -Math.sin(ang) * k; me.vz = -Math.cos(ang) * k; }
-        me.yaw += dYaw;
-        me.portalUntil = now + 700;
-        sfx.play('portal');
+        if (!this._inPortal(pair[i], wx, wz)) continue;
+        this._teleport(pair[i], pair[1 - i], now);
         return;
       }
     }
@@ -751,7 +783,7 @@ export class Game {
     this.viewmodel.setWeapon(i);
   }
 
-  // Canon à orbe : un appui lance la charge (1,8 s, déplacement ralenti), le tir part tout seul quand elle est pleine
+  // Canon à orbe : un appui lance la charge (1,5 s, déplacement ralenti), le tir part tout seul quand elle est pleine
   _updateCharge(now, w, firing) {
     const me = this.me;
     if (!me.charging) {
@@ -972,7 +1004,7 @@ export class Game {
       special = left > 0 ? `${cw.alt.name} : recharge ${Math.ceil(left / 1000)} s` : `${cw.alt.name} : PRÊT (clic droit / E)`;
     } else if (cw.kind === 'portal') special = 'Clic : portail bleu · clic droit / E : portail orange';
     else if (cw.kind === 'grapple') special = 'Saut pendant le grappin : on se décroche en gardant l\'élan';
-    else if (cw.charge) special = 'Un appui : charge 1,8 s (tu ralentis), puis l\'orbe traverse les ennemis';
+    else if (cw.charge) special = `Un appui : charge ${(cw.charge / 1000).toFixed(1).replace('.', ',')} s (tu ralentis), puis l'orbe traverse les ennemis`;
     else if (cw.kind === 'plane') special = 'Un appui : lancer · souris : diriger · tir : abandonner';
     else if (cw.streak !== undefined) special = `Arme de série · un seul chargeur${cw.kind === 'nuke' ? ' · 1 missile' : ''}`;
     if (me.flight) special = `AVION EN PAPIER · ${Math.max(0, Math.ceil(PLANE.life - (now - me.flight.born) / 1000))} s · tir : abandonner`;

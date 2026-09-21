@@ -125,11 +125,11 @@ export const WEAPONS = [
   },
   // ---- armes à 10 points (index 16, 17) : elles utilisent tout le budget d'une classe perso ----
   {
-    // Canon à orbe : on appuie, il charge 1,8 s (on avance lentement), puis envoie une boule qui TRAVERSE les ennemis
-    // sur toute sa trajectoire (120 dégâts chacun) et explose sur le premier mur.
-    id: 'orb', name: 'Canon à orbe', kind: 'orb', cost: 10, auto: false, interval: 3500, charge: 1800,
-    dmg: 70, headMul: 1, pellets: 1, spread: 0, mag: 2, reload: 4000, falloff: null, speed: 0.8, recoil: 2.5,
-    proj: { speed: 34, gravity: 0, life: 4.5, radius: 5, minMul: 0.3, self: 0.5, knock: 14, pierce: 1.15, passDmg: 120 },
+    // Canon à orbe : on appuie, il charge 1,5 s (on avance lentement), puis envoie une énorme boule qui TRAVERSE tous les
+    // ennemis dans un couloir de 3,4 m de rayon (140 dégâts chacun) et explose sur le premier mur (zone de 9 m, 140 au centre).
+    id: 'orb', name: 'Canon à orbe', kind: 'orb', cost: 10, auto: false, interval: 3000, charge: 1500,
+    dmg: 140, headMul: 1, pellets: 1, spread: 0, mag: 2, reload: 4000, falloff: null, speed: 0.8, recoil: 2.5,
+    proj: { speed: 40, gravity: 0, life: 4, radius: 9, minMul: 0.35, self: 0.5, knock: 22, pierce: 3.4, passDmg: 140 },
   },
   {
     // Avion en papier : on le lance et on le pilote à la première personne (souris). Il plane lentement ;

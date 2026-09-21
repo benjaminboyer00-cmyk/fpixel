@@ -449,6 +449,22 @@ async function main() {
       check('les portails disparaissent quand leur propriétaire part', !!off && off.o === A.id);
       await closeAll(B, C);
     }
+    // --- portails au sol et sur le dessus d'une boîte ---
+    {
+      const A = await mk('Pf-A', [W.PORTAL]), B = await mk('Pf-B', [W.KNIFE]);
+      await sleep(450);
+      A.at(-15, -25, Math.PI, W.PORTAL); await sleep(300);
+      A.fire(W.PORTAL, [-15, 1.6, -25], [0, -1, 0]);
+      const f = await B.waitFor('portal', (m) => m.o === A.id && m.i === 0, 1500).catch(() => null);
+      check('portail posé sur le sol (normale vers le haut)', !!f && f.ny === 1 && Math.abs(f.y - 0.03) < 0.01 && Math.abs(f.x - -15) < 0.1 && Math.abs(f.z - -25) < 0.1, JSON.stringify(f));
+      await sleep(450);
+      A.at(0, 8, 0, W.PORTAL); await sleep(300);
+      const dl = Math.hypot(0.1, 8);
+      A.fire(W.PORTAL, [0, 1.6, 8], [0, -0.1 / dl, -8 / dl], { alt: 1 });   // vise le dessus de la plateforme centrale (hauteur 1,5)
+      const t = await B.waitFor('portal', (m) => m.o === A.id && m.i === 1, 1500).catch(() => null);
+      check('portail orange posé sur le dessus d\'une plateforme', !!t && t.ny === 1 && Math.abs(t.y - 1.53) < 0.02 && Math.abs(t.x) < 0.1, JSON.stringify(t));
+      await closeAll(A, B);
+    }
     // --- carabine : un coup au jugé (sans viser), dégâts énormes ---
     {
       const A = await mk('Cb-A', [W.CARBINE]), B = await mk('Cb-B', [W.KNIFE]);
@@ -569,9 +585,9 @@ async function main() {
     }
     // --- canon à orbe : charge obligatoire, puis boule qui traverse tous les ennemis alignés ---
     {
-      const A = await mk('Ob-A', [W.ORB]), B = await mk('Ob-B', [W.KNIFE]), C = await mk('Ob-C', [W.KNIFE]);
+      const A = await mk('Ob-A', [W.ORB]), B = await mk('Ob-B', [W.KNIFE]), C = await mk('Ob-C', [W.KNIFE]), D = await mk('Ob-D', [W.KNIFE]);
       await sleep(450);
-      A.at(-15, -27, Math.PI, W.ORB); B.at(-15, -21, Math.PI); C.at(-15, -14, Math.PI); await sleep(300);   // le long mur (z=-10) est derrière C
+      A.at(-15, -27, Math.PI, W.ORB); B.at(-15, -21, Math.PI); C.at(-15, -14, Math.PI); D.at(-12, -18, Math.PI); await sleep(300);   // D : à 3 m à côté du couloir   // le long mur (z=-10) est derrière C
       A.fire(W.ORB, [-15, 1.0, -27], [0, 0, 1]);
       await sleep(300);
       check('orbe : sans charge, le tir est refusé', !A.has('proj', (m) => m.w === W.ORB));
@@ -581,16 +597,17 @@ async function main() {
       A.fire(W.ORB, [-15, 1.0, -27], [0, 0, 1]);
       await sleep(300);
       check('orbe : charge trop courte, tir refusé', !A.has('proj', (m) => m.w === W.ORB));
-      await sleep(1300);
+      await sleep(1100);
       A.fire(W.ORB, [-15, 1.0, -27], [0, 0, 1]);
       const pj = await A.waitFor('proj', (m) => m.w === W.ORB, 1500).catch(() => null);
       check('orbe : tir accepté après la charge complète', !!pj);
       await sleep(1200);
-      check('orbe : traverse le 1er ennemi et le tue (120 dégâts)', B.has('kill', (m) => m.v === B.id && m.w === W.ORB));
+      check('orbe : traverse le 1er ennemi et le tue (140 dégâts)', B.has('kill', (m) => m.v === B.id && m.w === W.ORB));
       check('orbe : continue et touche aussi le 2e ennemi derrière', C.has('kill', (m) => m.v === C.id && m.w === W.ORB));
+      check('orbe : zone large, un ennemi à 3 m du couloir est touché aussi', D.has('kill', (m) => m.v === D.id && m.w === W.ORB) || D.has('dmg'), JSON.stringify(D.log.filter((m) => m.t === 'dmg' || m.t === 'kill')));
       const bm = await A.waitFor('boom', (m) => m.w === W.ORB, 3000).catch(() => null);
-      check('orbe : explose sur le premier mur rencontré (rayon 5)', !!bm && bm.r === 5, JSON.stringify(bm));
-      await closeAll(A, B, C);
+      check('orbe : explose sur le premier mur rencontré (zone de 9 m)', !!bm && bm.r === 9, JSON.stringify(bm));
+      await closeAll(A, B, C, D);
     }
     // --- avion en papier : pilotage, contact corps (60) puis tête (mort), crash contre un mur ---
     {

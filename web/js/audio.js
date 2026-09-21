@@ -161,8 +161,8 @@ class Sfx {
         this._tone({ dur: 0.8, freq: 1400, freqEnd: 200, type: 'sine', gain: 0.3, out, delay: 0.02 });
         break;
       case 'charge':
-        this._tone({ dur: 1.8, freq: 120, freqEnd: 900, type: 'sawtooth', gain: 0.22, out });
-        this._tone({ dur: 1.8, freq: 240, freqEnd: 1800, type: 'sine', gain: 0.18, out });
+        this._tone({ dur: 1.5, freq: 120, freqEnd: 900, type: 'sawtooth', gain: 0.22, out });
+        this._tone({ dur: 1.5, freq: 240, freqEnd: 1800, type: 'sine', gain: 0.18, out });
         break;
       case 'plane':
         this._burst({ dur: 0.4, type: 'bandpass', freq: 1500, freqEnd: 700, q: 0.4, gain: 0.35, out });

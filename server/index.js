@@ -668,28 +668,41 @@ function fireGrapple(room, p, w, wi, o, d, targets, now) {
   broadcast(room, { t: 'shot', id: p.id, w: wi, o: [r2(o[0]), r2(o[1]), r2(o[2])], e: [end.map(r2)] }, p);
 }
 
-// ---- pistolet portail : pose un portail (bleu ou orange) sur un mur vertical ----
-const PORTAL_W = 1.0, PORTAL_H = 2.0;
+// ---- pistolet portail : pose un portail (bleu ou orange) sur un mur, sur le sol, ou sur le dessus / dessous d'une boîte ----
+const PORTAL_W = 1.0, PORTAL_H = 2.0, PORTAL_S = 1.4;   // mur : 1 x 2 m ; sol et plafond : carré de 1,4 m
 function firePortal(room, p, w, m, o, d) {
   const which = m.alt ? 1 : 0;
-  const hit = rayMap(room.map, o[0], o[1], o[2], d[0], d[1], d[2], w.range);
-  if (!hit.box) return;
-  const px = o[0] + d[0] * hit.t, py = o[1] + d[1] * hit.t, pz = o[2] + d[2] * hit.t;
-  const n = hitNormal(hit.box, px, py, pz);
-  if (n.ny !== 0) return;                       // seulement sur les murs
-  const b = hit.box;
-  const alongX = n.nz !== 0;                    // face ±Z : le portail s'étend selon X
-  const lo = alongX ? b.x0 : b.z0, hi = alongX ? b.x1 : b.z1;
-  if (hi - lo < PORTAL_W + 0.05 || b.y1 - b.y0 < PORTAL_H + 0.05) return; // la face est trop petite
-  const along = clamp(alongX ? px : pz, lo + PORTAL_W / 2, hi - PORTAL_W / 2);
-  const cy = clamp(py, b.y0 + PORTAL_H / 2, b.y1 - PORTAL_H / 2);
-  const portal = alongX
-    ? { x: along, y: cy, z: (n.nz > 0 ? b.z1 : b.z0) + n.nz * 0.03, nx: 0, nz: n.nz }
-    : { x: (n.nx > 0 ? b.x1 : b.x0) + n.nx * 0.03, y: cy, z: along, nx: n.nx, nz: 0 };
+  const wall = rayMap(room.map, o[0], o[1], o[2], d[0], d[1], d[2], w.range);
+  let floorT = Infinity;                                 // le sol (y = 0) n'est pas une boîte : intersection du plan
+  if (d[1] < -0.001) { const t = -o[1] / d[1]; if (t > 0 && t <= w.range) floorT = t; }
+  const wallT = wall.box ? wall.t : Infinity;
+  let portal = null;
+  if (floorT < wallT) {
+    const lim = room.map.half - PORTAL_S / 2;
+    portal = { x: clamp(o[0] + d[0] * floorT, -lim, lim), y: 0.03, z: clamp(o[2] + d[2] * floorT, -lim, lim), nx: 0, ny: 1, nz: 0 };
+  } else if (wall.box) {
+    const b = wall.box;
+    const px = o[0] + d[0] * wall.t, py = o[1] + d[1] * wall.t, pz = o[2] + d[2] * wall.t;
+    const n = hitNormal(b, px, py, pz);
+    if (n.ny !== 0) {                                    // dessus (n.ny = 1) ou dessous (-1) d'une boîte
+      const h = PORTAL_S / 2;
+      if (b.x1 - b.x0 < PORTAL_S + 0.05 || b.z1 - b.z0 < PORTAL_S + 0.05) return;   // surface trop petite
+      portal = { x: clamp(px, b.x0 + h, b.x1 - h), y: n.ny > 0 ? b.y1 + 0.03 : b.y0 - 0.03, z: clamp(pz, b.z0 + h, b.z1 - h), nx: 0, ny: n.ny, nz: 0 };
+    } else {
+      const alongX = n.nz !== 0;                         // face ±Z : le portail s'étend selon X
+      const lo = alongX ? b.x0 : b.z0, hi = alongX ? b.x1 : b.z1;
+      if (hi - lo < PORTAL_W + 0.05 || b.y1 - b.y0 < PORTAL_H + 0.05) return; // la face est trop petite
+      const along = clamp(alongX ? px : pz, lo + PORTAL_W / 2, hi - PORTAL_W / 2);
+      const cy = clamp(py, b.y0 + PORTAL_H / 2, b.y1 - PORTAL_H / 2);
+      portal = alongX
+        ? { x: along, y: cy, z: (n.nz > 0 ? b.z1 : b.z0) + n.nz * 0.03, nx: 0, ny: 0, nz: n.nz }
+        : { x: (n.nx > 0 ? b.x1 : b.x0) + n.nx * 0.03, y: cy, z: along, nx: n.nx, ny: 0, nz: 0 };
+    }
+  } else return;
   const pair = room.portals.get(p.id) || [null, null];
   pair[which] = portal;
   room.portals.set(p.id, pair);
-  broadcast(room, { t: 'portal', o: p.id, i: which, x: r2(portal.x), y: r2(portal.y), z: r2(portal.z), nx: portal.nx, nz: portal.nz });
+  broadcast(room, { t: 'portal', o: p.id, i: which, x: r2(portal.x), y: r2(portal.y), z: r2(portal.z), nx: portal.nx, ny: portal.ny, nz: portal.nz });
 }
 
 // ---- laser (arme de série) : rayon continu jusqu'au premier mur ; la cible touchée est étourdie ----
@@ -963,7 +976,7 @@ function handleMessage(ws, raw) {
       state: room.state, win: room.winner, until: room.endAt,
       teamKills: room.teamKills, back: returning,
       gas: room.gas ? { owner: room.gas.owner.id, ms: Math.max(0, room.gas.until - now) } : null,
-      portals: [...room.portals].flatMap(([o, pair]) => pair.map((q, i) => q && { o, i, x: q.x, y: q.y, z: q.z, nx: q.nx, nz: q.nz }).filter(Boolean)),
+      portals: [...room.portals].flatMap(([o, pair]) => pair.map((q, i) => q && { o, i, x: q.x, y: q.y, z: q.z, nx: q.nx, ny: q.ny, nz: q.nz }).filter(Boolean)),
     });
     if (returning) {
       spawnPlayer(room, p, now);

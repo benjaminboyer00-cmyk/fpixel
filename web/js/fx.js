@@ -89,7 +89,7 @@ export class Fx {
   addProj(id, kind, x, y, z, vx, vy, vz, g, bounce = 0) {
     const orb = kind === 'orb';
     const grenade = kind === 'grenade' || kind === 'frag' || orb;
-    const sz = orb ? 0.75 : grenade ? 0.24 : 0.16;
+    const sz = orb ? 1.7 : grenade ? 0.24 : 0.16;
     const m = new THREE.Mesh(
       new THREE.BoxGeometry(sz, sz, grenade ? sz : 0.5),
       new THREE.MeshBasicMaterial({ color: orb ? 0xc040ff : grenade ? 0x4d5a3d : 0xd9d9d9, fog: false }));
@@ -136,15 +136,16 @@ export class Fx {
   }
 
   // Portail : cadre coloré + intérieur lumineux, posé contre un mur (n = normale horizontale)
-  setPortal(key, i, x, y, z, nx, nz) {
+  setPortal(key, i, x, y, z, nx, nz, ny = 0) {
     this.removePortal(key);
     const color = i === 0 ? 0x3e82f7 : 0xf5a524;
     const g = new THREE.Group();
-    g.add(new THREE.Mesh(new THREE.BoxGeometry(1.2, 2.2, 0.05), new THREE.MeshBasicMaterial({ color, fog: false })));
-    const inner = new THREE.Mesh(new THREE.BoxGeometry(0.92, 1.92, 0.06), new THREE.MeshBasicMaterial({ color: i === 0 ? 0xbfd8ff : 0xffe2b0, transparent: true, opacity: 0.85, fog: false }));
+    const flat = ny !== 0;   // portail de sol / de plafond : carré posé à plat
+    g.add(new THREE.Mesh(new THREE.BoxGeometry(flat ? 1.6 : 1.2, flat ? 0.05 : 2.2, flat ? 1.6 : 0.05), new THREE.MeshBasicMaterial({ color, fog: false })));
+    const inner = new THREE.Mesh(new THREE.BoxGeometry(flat ? 1.32 : 0.92, flat ? 0.06 : 1.92, flat ? 1.32 : 0.06), new THREE.MeshBasicMaterial({ color: i === 0 ? 0xbfd8ff : 0xffe2b0, transparent: true, opacity: 0.85, fog: false }));
     g.add(inner);
     g.position.set(x, y, z);
-    g.rotation.y = Math.atan2(nx, nz);
+    if (!flat) g.rotation.y = Math.atan2(nx, nz);
     g.userData.inner = inner;
     this.scene.add(g);
     this.portals.set(key, g);
@@ -219,7 +220,7 @@ export class Fx {
       }
       if (!p.grenade) p.m.lookAt(p.m.position.x + p.vx, p.m.position.y + p.vy, p.m.position.z + p.vz);
       p.trail -= dt;
-      if (p.trail <= 0) { p.trail = p.orb ? 0.02 : 0.035; this.burst(p.m.position.x, p.m.position.y, p.m.position.z, p.orb ? '#c040ff' : p.grenade ? '#8a8a8a' : '#ffb04a', p.orb ? 2 : 1, p.orb ? 1.4 : 0.6, 0.4); if (p.orb) p.m.rotation.y += 0.4; }
+      if (p.trail <= 0) { p.trail = p.orb ? 0.02 : 0.035; this.burst(p.m.position.x, p.m.position.y, p.m.position.z, p.orb ? '#c040ff' : p.grenade ? '#8a8a8a' : '#ffb04a', p.orb ? 5 : 1, p.orb ? 5 : 0.6, 0.5); if (p.orb) p.m.rotation.y += 0.4; }
     }
     const k = 1 - Math.exp(-dt * 18);
     for (const p of this.planes.values()) {
