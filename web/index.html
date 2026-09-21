@@ -17,6 +17,7 @@
   <!-- ============================ HUD ============================ -->
   <div id="hud" class="hidden">
     <div id="topbar"><div id="score-line"></div><div id="score-sub"></div></div>
+    <canvas id="minimap"></canvas>
     <div id="killfeed"></div>
     <div id="crosshair"><i></i><i></i><i></i><i></i></div>
     <div id="hitmarker"></div>
@@ -27,6 +28,7 @@
     <div id="bottom-left"><div id="hp-bar"><div id="hp-fill"></div></div><div id="hp-text">100</div></div>
     <div id="bottom-right"><div id="weapon-name"></div><div id="ammo"></div></div>
     <div id="weapons"></div>
+    <div id="hint"></div>
     <div id="netinfo"></div>
     <div id="scoreboard" class="hidden"></div>
   </div>
@@ -73,7 +75,7 @@
 
       <details class="help">
         <summary>Contrôles</summary>
-        <p class="desktop-only"><b>ZQSD / WASD</b> bouger · <b>Souris</b> viser · <b>Clic gauche</b> (ou <b>F</b> / <b>Entrée</b>) tirer · <b>Clic droit</b> zoom sniper · <b>Espace</b> sauter · <b>R</b> recharger · <b>1-5 / molette</b> armes · <b>Tab</b> scores · <b>Échap</b> pause<br>Portable sans souris : <b>flèches</b> pour viser + <b>F</b> pour tirer, ou active le tir automatique dans les réglages.</p>
+        <p class="desktop-only"><b>ZQSD / WASD</b> bouger · <b>Souris</b> viser · <b>Clic gauche</b> (ou <b>F</b> / <b>Entrée</b>) tirer · <b>Clic droit</b> zoom sniper · <b>Espace</b> sauter · <b>R</b> recharger · <b>1-5 / molette</b> armes · <b>Tab</b> scores · <b>M</b> mini-carte · <b>Échap</b> pause<br>Portable sans souris : <b>flèches</b> pour viser, <b>F</b> pour tirer, et le <b>tir automatique</b> (réglages) tire tout seul quand un ennemi est dans le viseur.</p>
         <p class="touch-only"><b>Joystick gauche</b> bouger · <b>Glisser à droite</b> viser · <b>FEU</b> tirer (glisse dessus pour viser en tirant) · <b>ZOOM</b> pour le sniper</p>
       </details>
     </div>
@@ -98,6 +100,7 @@
       <div class="row"><label for="s-fov">Champ de vision (horizontal)</label><input id="s-fov" type="range" min="70" max="120" step="1"><output id="o-fov"></output></div>
       <div class="row"><label for="s-scale">Qualité (résolution)</label><input id="s-scale" type="range" min="0.3" max="1" step="0.05"><output id="o-scale"></output></div>
       <div class="row"><label for="s-vol">Volume</label><input id="s-vol" type="range" min="0" max="1" step="0.05"><output id="o-vol"></output></div>
+      <div class="row"><label for="s-map">Mini-carte (touche M)</label><input id="s-map" type="checkbox"></div>
       <div class="row"><label for="s-auto">Tir automatique (ennemi dans le viseur)</label><input id="s-auto" type="checkbox"></div>
       <div class="row"><label for="s-inv">Inverser l'axe vertical</label><input id="s-inv" type="checkbox"></div>
       <button id="close-settings" class="btn primary">OK</button>

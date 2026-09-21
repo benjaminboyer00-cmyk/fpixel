@@ -19,8 +19,11 @@ Petit FPS low-poly en ligne, pensé pour ~10 joueurs, sur PC (clavier/souris) et
 **Bots** : le serveur complète les parties (1v1 : 1 bot en solo · équipes : 4v4 · chacun pour soi : 6 joueurs). Ils cèdent leur place dès qu'un humain arrive
 et jouent avec les mêmes règles (mêmes armes, mêmes dégâts, murs qui bloquent). Case « Compléter avec des bots » dans le menu pour les désactiver.
 
+**Mini-carte** (haut-gauche, touche **M** pour la cacher) : toute l'arène vue de dessus, avec tes **coéquipiers** toujours visibles et un **anneau coloré** à l'endroit où quelqu'un vient de tirer (2 s).
+Les ennemis qui ne tirent pas restent invisibles : ce n'est pas un wallhack.
+
 **Contrôles PC** : ZQSD/WASD bouger · souris viser · clic gauche **ou F / Entrée** tirer (maintenu = tir en continu) · clic droit zoom sniper · Espace sauter · R recharger · Tab scores.
-**Portable sans souris** : le pavé tactile ignore les clics tant qu'une touche est enfoncée (« désactiver pendant la frappe ») → viser avec les **flèches**, tirer avec **F**, ou activer le **tir automatique** dans les réglages.
+**Portable sans souris** : le pavé tactile ignore les clics tant qu'une touche est enfoncée (« désactiver pendant la frappe ») → viser avec les **flèches**, tirer avec **F**, ou le **tir automatique** (activé par défaut, réglable) qui tire tout seul quand un ennemi est dans le viseur.
 
 ## Architecture
 

@@ -12,7 +12,8 @@ import { Fx } from './fx.js';
 import { stepPlayer } from './physics.js';
 import { playerColor } from './hud.js';
 import { sfx } from './audio.js';
-import { isTouch } from './config.js';
+import { isTouch, saveSettings } from './config.js';
+import { Minimap } from './minimap.js';
 
 const MAX_TRACER = 90;
 
@@ -33,6 +34,7 @@ export class Game {
     this.camera.rotation.order = 'YXZ';
     createWorld(this.scene);
     this.fx = new Fx(this.scene);
+    this.minimap = new Minimap(document.getElementById('minimap'));
 
     // 2e scène : l'arme en main
     this.vmScene = new THREE.Scene();
@@ -68,6 +70,7 @@ export class Game {
     const w = innerWidth, h = innerHeight;
     this.renderer.setSize(Math.max(160, Math.floor(w * s.scale)), Math.max(90, Math.floor(h * s.scale)), false);
     this.aspect = w / h;
+    this.minimap?.resize();
     this.camera.aspect = this.aspect;
     this.vmCamera.aspect = this.aspect;
     this.vmCamera.updateProjectionMatrix();
@@ -122,6 +125,10 @@ export class Game {
     this.last = performance.now();
     this.fpsT = this.last; this.fpsN = 0; this.fps = 0;
     this.hud.show();
+    this.minimap.resize();
+    this.hud.hint(isTouch
+      ? 'Joystick : bouger · glisser à droite : viser · le tir est automatique sur un ennemi'
+      : 'F / Entrée : tirer · Flèches : viser · M : mini-carte · tir auto activé (réglages)', 10000);
     document.body.classList.add('ingame');
     this._raf = requestAnimationFrame((t) => this._frame(t));
   }
@@ -132,6 +139,7 @@ export class Game {
     for (const p of this.players.values()) this._removeModel(p);
     this.players.clear();
     this.fx.clear();
+    this.minimap.clear();
     this.input.enabled = false;
     this.input.reset();
     document.body.classList.remove('ingame');
@@ -298,6 +306,7 @@ export class Game {
       this.fx.tracer(sx, sy, sz, e[0], e[1], e[2]);
       this.fx.burst(e[0], e[1], e[2], '#cfcfcf', 2, 2, 0.3);
     }
+    this.minimap.ping(ox, oz, p ? playerColor(this.mode, p) : '#ffffff');
     const cam = this.camera.position;
     const dx = ox - cam.x, dz = oz - cam.z;
     const dist = Math.hypot(dx, dz, oy - cam.y);
@@ -579,6 +588,16 @@ export class Game {
       this.hud.death(false);
     }
     this.banner();
+
+    const s = this.getSettings();
+    if (this.input.takeMapToggle()) {
+      s.minimap = !s.minimap;
+      saveSettings(s);
+      const box = document.getElementById('s-map');
+      if (box) box.checked = s.minimap;
+    }
+    this.minimap.setVisible(s.minimap !== false);
+    if (s.minimap !== false) this.minimap.draw(this, now);
 
     const list = () => [...this.players.values()];
     if (this.scoreDirty) {

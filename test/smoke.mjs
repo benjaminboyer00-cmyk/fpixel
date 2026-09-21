@@ -24,7 +24,7 @@ class Bot {
     this.ws.on('message', (d) => {
       const m = JSON.parse(d.toString());
       if (m.t !== 's') this.log.push(m);
-      if (m.t === 's') this.lastSnap = m;
+      if (m.t === 's') { this.lastSnap = m; this.firstSnap = this.firstSnap || m; }
       this.waiters = this.waiters.filter((w) => !(w.type === m.t && (!w.pred || w.pred(m)) && (w.res(m), true)));
     });
     await new Promise((r) => this.ws.on('open', r));
@@ -193,6 +193,10 @@ async function main() {
     const all = [...wt.players, ...TT.log.filter((m) => m.t === 'pjoin').map((m) => m.p)];
     const red = all.filter((p) => p.team === 'red').length, blue = all.filter((p) => p.team === 'blue').length;
     check('équipes : complétées à 8, équilibrées 4v4', red === 4 && blue === 4, `rouge=${red} bleu=${blue}`);
+    const pts = TT.firstSnap.p.filter((r) => r[6] > 0);
+    let dmin = Infinity;
+    for (let i = 0; i < pts.length; i++) for (let j = i + 1; j < pts.length; j++) dmin = Math.min(dmin, Math.hypot(pts[i][1] - pts[j][1], pts[i][3] - pts[j][3]));
+    check('à l\'apparition, personne n\'est empilé sur un autre joueur', pts.length >= 6 && dmin > 2, `${pts.length} joueurs, distance min ${dmin.toFixed(2)} m`);
     TT.ws.close();
 
     const N = new Bot('SansBot');

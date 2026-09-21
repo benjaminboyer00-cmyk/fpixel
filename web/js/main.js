@@ -187,6 +187,8 @@ for (const [id, out, key, fmt] of SLIDERS) {
     game?.applySettings();
   });
 }
+$('s-map').checked = settings.minimap !== false;
+$('s-map').addEventListener('change', () => { settings.minimap = $('s-map').checked; saveSettings(settings); });
 $('s-auto').checked = !!settings.autoFire;
 $('s-auto').addEventListener('change', () => { settings.autoFire = $('s-auto').checked; saveSettings(settings); });
 $('s-inv').checked = !!settings.invertY;

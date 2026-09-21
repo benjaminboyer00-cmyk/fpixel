@@ -5,7 +5,8 @@ import { isTouch } from './config.js';
 const LOOK_MOUSE = 0.0022; // rad par pixel
 const LOOK_TOUCH = 0.0042;
 const STICK_R = 55;
-const KEY_LOOK = 2.4;      // rad/s : viser avec les flèches (portable sans souris)
+const KEY_LOOK = 2.4;      // rad/s max : viser avec les flèches (portable sans souris)
+const KEY_LOOK_MIN = 0.55; // ...en démarrant lentement pour pouvoir viser finement
 const FIRE_KEYS = ['KeyF', 'Enter', 'NumpadEnter', 'ControlRight']; // tirer au clavier
 
 export class Input {
@@ -26,6 +27,8 @@ export class Input {
     this._weapon = null;
     this._cycle = 0;
     this._scopeToggle = false;
+    this._mapToggle = false;
+    this._arrowT = { x: 0, y: 0 };
     this._lookX = 0;
     this._lookY = 0;
     this.touches = new Map();
@@ -46,9 +49,14 @@ export class Input {
 
   takeLook(dt = 0) {
     if (dt && !isTouch) { // flèches : viser au clavier
-      const k = this.keys;
-      this._lookX += ((k.has('ArrowRight') ? 1 : 0) - (k.has('ArrowLeft') ? 1 : 0)) * KEY_LOOK * dt;
-      this._lookY += ((k.has('ArrowDown') ? 1 : 0) - (k.has('ArrowUp') ? 1 : 0)) * KEY_LOOK * dt;
+      const k = this.keys, t = this._arrowT;
+      const kx = (k.has('ArrowRight') ? 1 : 0) - (k.has('ArrowLeft') ? 1 : 0);
+      const ky = (k.has('ArrowDown') ? 1 : 0) - (k.has('ArrowUp') ? 1 : 0);
+      t.x = kx ? t.x + dt : 0;                       // plus on garde la flèche, plus ça tourne vite
+      t.y = ky ? t.y + dt : 0;
+      const speed = (s) => KEY_LOOK_MIN + Math.min(1, s / 0.4) * (KEY_LOOK - KEY_LOOK_MIN);
+      this._lookX += kx * speed(t.x) * dt;
+      this._lookY += ky * speed(t.y) * dt;
     }
     const r = [this._lookX, this._lookY];
     this._lookX = this._lookY = 0;
@@ -59,6 +67,7 @@ export class Input {
     this._firePressAt = -1e9;
     return ok && this.active;
   }
+  takeMapToggle() { const r = this._mapToggle; this._mapToggle = false; return r && this.active; }
   takeReload() { const r = this._reload; this._reload = false; return r && this.active; }
   takeWeapon() { const w = this._weapon; this._weapon = null; return this.active ? w : null; }
   takeCycle() { const c = this._cycle; this._cycle = 0; return this.active ? c : 0; }
@@ -70,7 +79,8 @@ export class Input {
     this.scopeHeld = this.jumpHeld = this.scoreHeld = false;
     this.stick.x = this.stick.y = 0;
     this._lookX = this._lookY = 0;
-    this._reload = false; this._weapon = null; this._cycle = 0; this._scopeToggle = false;
+    this._reload = false; this._weapon = null; this._cycle = 0; this._scopeToggle = false; this._mapToggle = false;
+    this._arrowT.x = this._arrowT.y = 0;
   }
 
   requestLock() {
@@ -97,6 +107,7 @@ export class Input {
       if (c === 'Tab') { e.preventDefault(); this.scoreHeld = true; return; }
       if (c === 'Space') { e.preventDefault(); this.jumpHeld = true; return; }
       if (c === 'KeyR') { this._reload = true; return; }
+      if (c === 'KeyM') { this._mapToggle = true; return; }
       if (FIRE_KEYS.includes(c)) {
         e.preventDefault();
         if (!this.fireSrc.key) this._firePressAt = performance.now();

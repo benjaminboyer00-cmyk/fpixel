@@ -231,13 +231,16 @@ function scoreMsg(room) {
 }
 
 function pickSpawn(room, p) {
-  const enemies = [...room.players.values()].filter((q) => q !== p && q.alive && (!room.cfg.teams || q.team !== p.team));
+  const others = [...room.players.values()].filter((q) => q !== p && q.alive);
+  const enemies = others.filter((q) => !room.cfg.teams || q.team !== p.team);
   let pool = SPAWNS.filter((s) => (room.cfg.teams ? s.team === p.team : true));
   if (!pool.length) pool = SPAWNS;
   const scored = pool.map((s) => {
     let dmin = 1e9;
     for (const q of enemies) dmin = Math.min(dmin, Math.hypot(q.x - s.x, q.z - s.z));
-    return { s, dmin: dmin + Math.random() * 6 }; // un peu d'aléatoire pour ne pas être prévisible
+    // jamais sur quelqu'un (coéquipier compris) : sinon les joueurs apparaissent empilés
+    const taken = others.some((q) => Math.hypot(q.x - s.x, q.z - s.z) < 2.5);
+    return { s, dmin: dmin + Math.random() * 6 - (taken ? 1000 : 0) }; // un peu d'aléatoire pour ne pas être prévisible
   });
   scored.sort((a, b) => b.dmin - a.dmin);
   return scored[0].s;

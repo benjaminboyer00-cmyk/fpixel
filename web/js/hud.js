@@ -124,6 +124,15 @@ export class Hud {
     this.dmgT = setTimeout(() => { f.classList.remove('on'); a.classList.remove('on'); }, 120);
   }
 
+  // petit message d'aide qui disparaît tout seul
+  hint(text, ms = 8000) {
+    const e = $('hint');
+    e.textContent = text;
+    e.classList.add('on');
+    clearTimeout(this.hintT);
+    this.hintT = setTimeout(() => e.classList.remove('on'), ms);
+  }
+
   netinfo(text) { this._set('netinfo', 'net', text, (e, v) => { e.textContent = v; }); }
 
   // -------- scores --------
