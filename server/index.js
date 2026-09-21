@@ -68,6 +68,9 @@ const tokens = new Map(); // jeton de reconnexion -> joueur
 let nextPlayerId = 1;
 let nextAutoRoom = 1;
 
+// Charge de la boucle de jeu (visible dans /health) : retard moyen / max du tick et temps de calcul par tick, en ms
+const tickStats = { late: 0, lateMax: 0, work: 0, workMax: 0 };
+
 function lobbyInfo() {
   const modes = {};
   for (const m of Object.keys(MODES)) modes[m] = { players: 0, max: MODES[m].max, rooms: [] };
@@ -78,7 +81,8 @@ function lobbyInfo() {
     modes[r.mode].rooms.push({ id: r.name, n, max: r.cfg.max, bots: r.fill, diff: r.diff });
     online += n;
   }
-  return { ok: true, online, modes };
+  const r1 = (v) => Math.round(v * 10) / 10;
+  return { ok: true, online, modes, tick: { ms: TICK_MS, late: r1(tickStats.late), lateMax: r1(tickStats.lateMax), work: r1(tickStats.work), workMax: r1(tickStats.workMax) } };
 }
 
 function humanCount(room) {
@@ -856,8 +860,13 @@ function handleMessage(ws, raw) {
 
 // ---------------------------------------------------------------- Boucle ----
 
+let lastTick = Date.now();
 setInterval(() => {
   const now = Date.now();
+  const late = Math.max(0, now - lastTick - TICK_MS);
+  lastTick = now;
+  tickStats.late += (late - tickStats.late) * 0.02;
+  tickStats.lateMax = Math.max(late, tickStats.lateMax * 0.995);
   for (const room of rooms.values()) {
     // fin de manche -> nouvelle manche
     if (room.state === 'ended' && now >= room.endAt) resetMatch(room);
@@ -891,6 +900,9 @@ setInterval(() => {
     broadcast(room, { t: 's', ts: now, p: snap });
     for (const p of expired) removePlayer(p);
   }
+  const work = Date.now() - now;
+  tickStats.work += (work - tickStats.work) * 0.02;
+  tickStats.workMax = Math.max(work, tickStats.workMax * 0.995);
 }, TICK_MS);
 
 // ---------------------------------------------------------------- WebSocket ----

@@ -1,7 +1,9 @@
 // Constantes partagées entre le client (navigateur) et le serveur (Node).
 
-export const TICK_MS = 50;            // un snapshot toutes les 50 ms (20 Hz)
-export const INTERP_MS = 100;         // les autres joueurs sont affichés 100 ms "dans le passé"
+export const TICK_MS = 33;            // un snapshot toutes les 33 ms (30 Hz)
+export const INTERP_MS = 100;         // retard d'affichage initial des autres joueurs (ensuite adaptatif, voir MIN_INTERP_MS)
+export const MIN_INTERP_MS = 66;      // retard d'affichage minimal : 2 snapshots
+export const MAX_EXTRAP_MS = 100;     // si un snapshot tarde, on prolonge le mouvement au plus 100 ms
 export const REWIND_MAX_MS = 400;     // compensation de lag maximale côté serveur
 export const MAX_RAY = 200;
 

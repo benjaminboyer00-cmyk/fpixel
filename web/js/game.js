@@ -1,7 +1,7 @@
 // Boucle de jeu : joueur local (prédit côté client), autres joueurs (interpolés), tirs, effets, HUD.
 import * as THREE from 'three';
 import {
-  TICK_MS, INTERP_MS, EYE_HEIGHT, MAX_HP, RESPAWN_MS, WALK_SPEED, JUMP_SPEED, WEAPONS, GUN_ORDER, KNIFE, resolveClass, STREAK_WEAPONS,
+  TICK_MS, INTERP_MS, MIN_INTERP_MS, MAX_EXTRAP_MS, EYE_HEIGHT, MAX_HP, RESPAWN_MS, WALK_SPEED, JUMP_SPEED, WEAPONS, GUN_ORDER, KNIFE, resolveClass, STREAK_WEAPONS,
 } from '../shared/config.js';
 import { mapById } from '../shared/map.js';
 import { mulberry32, applySpread, lookDir, clamp, angleLerp, rayAABB } from '../shared/util.js';
@@ -49,6 +49,8 @@ export class Game {
     this.players = new Map();
     this.portals = new Map();   // id du propriétaire -> [portail bleu, portail orange]
     this.shake = 0;
+    this.interp = INTERP_MS;    // retard d'affichage des autres joueurs (ms), ajusté à la gigue du réseau
+    this._jit = 0; this._lastSnapAt = 0; this._predAt = 0;
     this.nukeAt = 0;            // heure d'impact du missile nucléaire en vol
     this.gas = null;            // gaz toxique : { owner, until }
     this.running = false;
@@ -132,6 +134,7 @@ export class Game {
     this.portals.clear();
     for (const q of welcome.portals || []) this._setPortal(q);
     this.nukeAt = 0; this.gas = null;
+    this.interp = INTERP_MS; this._jit = 0; this._lastSnapAt = 0;
     if (welcome.gas) this._setGas({ owner: welcome.gas.owner, ms: welcome.gas.ms });
     this.viewmodel.setWeapon(this.me.weapon);
     this.hud.setLoadout(loadout);
@@ -225,6 +228,11 @@ export class Game {
       this.scoreDirty = true;
     });
     n.on('s', (m) => {
+      // gigue d'arrivée des snapshots -> retard d'affichage : juste assez pour toujours avoir 2 positions à interpoler
+      const t = performance.now();
+      if (this._lastSnapAt) this._jit += (Math.min(200, Math.abs(t - this._lastSnapAt - TICK_MS)) - this._jit) * 0.05;
+      this._lastSnapAt = t;
+      this.interp += (clamp(TICK_MS * 2 + this._jit * 2.5, MIN_INTERP_MS, 220) - this.interp) * 0.02;
       for (const e of m.p) {
         const [id, x, y, z, yaw, pitch, hp, w, prot] = e;
         if (id === this.myId) {
@@ -242,7 +250,7 @@ export class Game {
     n.on('shot', (m) => this._onRemoteShot(m));
     n.on('hit', (m) => {
       this.hud.hitmarker(m.k);
-      sfx.play(m.k ? 'kill' : m.h ? 'headshot' : 'hit');
+      if (m.k || m.h || performance.now() - this._predAt > 400) sfx.play(m.k ? 'kill' : m.h ? 'headshot' : 'hit');
       const v = this.players.get(m.v);
       if (v && v.model.group.visible) {
         const g = v.model.group.position;
@@ -450,7 +458,7 @@ export class Game {
     if (now - this.fpsT > 500) {
       this.fps = Math.round((this.fpsN * 1000) / (now - this.fpsT));
       this.fpsN = 0; this.fpsT = now;
-      this.hud.netinfo(`${this.fps} FPS · ${Math.round(this.net.rtt)} ms`);
+      this.hud.netinfo(`${this.fps} FPS · ${Math.round(this.net.rtt)} ms · affichage −${Math.round(this.interp)} ms`);
     }
   }
 
@@ -564,6 +572,20 @@ export class Game {
       }
     }
     me.speed2d = Math.hypot(me.vx, me.vz);
+  }
+
+  // Distance du premier ennemi touché par ce rayon (positions affichées), ou 0 si aucun avant `reach`
+  _rayEnemy(ex, ey, ez, dx, dy, dz, reach) {
+    let best = 0;
+    for (const p of this.players.values()) {
+      if (p.id === this.myId || p.hp <= 0 || p.prot || !p.snaps.length || !p.model.group.visible) continue;
+      if (this.mode === 'tdm' && p.team === this.myTeam()) continue;
+      const g = p.model.group.position;
+      const body = rayAABB(ex, ey, ez, dx, dy, dz, g.x - 0.35, g.y, g.z - 0.35, g.x + 0.35, g.y + 1.4, g.z + 0.35, reach);
+      const head = rayAABB(ex, ey, ez, dx, dy, dz, g.x - 0.25, g.y + 1.4, g.z - 0.25, g.x + 0.25, g.y + 1.85, g.z + 0.25, reach);
+      for (const t of [body, head]) if (t >= 0 && (!best || t < best)) best = t;
+    }
+    return best;
   }
 
   // Un ennemi vivant, sans mur devant, est-il pile sous le viseur ? (tir automatique)
@@ -701,7 +723,7 @@ export class Game {
       t: 'fire', w: me.weapon, seed, sc: me.scoped ? 1 : 0, alt: alt ? 1 : 0,
       ox: +ex.toFixed(3), oy: +ey.toFixed(3), oz: +ez.toFixed(3),
       dx: +dx.toFixed(4), dy: +dy.toFixed(4), dz: +dz.toFixed(4),
-      rt: Math.round(this.net.serverNow() - INTERP_MS),
+      rt: Math.round(this.net.serverNow() - this.interp),
     });
 
     // Effets locaux immédiats (même graine que le serveur => mêmes plombs)
@@ -727,6 +749,7 @@ export class Game {
     }
     if (!w.melee) {
       const rng = mulberry32(seed);
+      let predicted = false;
       const mz = this.camera.localToWorld(this._v.set(0.2, -0.18, -0.7));
       const mx0 = mz.x, my0 = mz.y, mz0 = mz.z;
       for (let i = 0; i < (w.kind ? 0 : w.pellets); i++) {
@@ -736,16 +759,20 @@ export class Game {
           const h = rayAABB(ex, ey, ez, px, py, pz, b.x0, b.y0, b.z0, b.x1, b.y1, b.z1, tt);
           if (h >= 0 && h < tt) tt = h;
         }
+        // ennemi touché d'après ce qu'on voit à l'écran : étincelle tout de suite (le serveur confirme ~1 ping plus tard)
+        const eh = w.kind || w.melee ? null : this._rayEnemy(ex, ey, ez, px, py, pz, tt);
+        if (eh) { tt = eh; predicted = true; this.fx.burst(ex + px * tt, ey + py * tt, ez + pz * tt, '#c62d32', 3, 2.5, 0.25); }
         this.fx.tracer(mx0, my0, mz0, ex + px * tt, ey + py * tt, ez + pz * tt);
-        if (tt < MAX_TRACER) this.fx.burst(ex + px * tt, ey + py * tt, ez + pz * tt, '#cfcfcf', 2, 2, 0.3);
+        if (tt < MAX_TRACER && !eh) this.fx.burst(ex + px * tt, ey + py * tt, ez + pz * tt, '#cfcfcf', 2, 2, 0.3);
       }
+      if (predicted) { this._predAt = now; sfx.play('tick'); }
       me.pitch += w.recoil * 0.004; // léger recul de la visée
     }
     if (w.mag && me.ammo[me.weapon] === 0) this._startReload(now + w.interval - 1);
   }
 
   _updateRemotes(dt) {
-    const renderT = this.net.serverNow() - INTERP_MS;
+    const renderT = this.net.serverNow() - this.interp;
     for (const p of this.players.values()) {
       const s = p.snaps;
       const g = p.model.group;
@@ -756,9 +783,14 @@ export class Game {
         ({ x, y, z, yaw, pitch } = s[0]);
       } else {
         const a = s[0], b = s[1];
-        const f = clamp((renderT - a.ts) / (b.ts - a.ts || 1), 0, 1);
-        x = a.x + (b.x - a.x) * f; y = a.y + (b.y - a.y) * f; z = a.z + (b.z - a.z) * f;
-        yaw = angleLerp(a.yaw, b.yaw, f); pitch = a.pitch + (b.pitch - a.pitch) * f;
+        const span = b.ts - a.ts || 1;
+        // snapshot en retard : on prolonge le mouvement un court instant (sauf saut de téléportation : réapparition)
+        const jump = Math.hypot(b.x - a.x, b.z - a.z) > 5;
+        const f = clamp((renderT - a.ts) / span, 0, jump ? 1 : 1 + MAX_EXTRAP_MS / span);
+        const fi = Math.min(f, 1);
+        x = a.x + (b.x - a.x) * f; z = a.z + (b.z - a.z) * f;
+        y = a.y + (b.y - a.y) * fi + (f > 1 ? clamp((b.y - a.y) * (f - 1), -0.3, 0.6) : 0);
+        yaw = angleLerp(a.yaw, b.yaw, f); pitch = a.pitch + (b.pitch - a.pitch) * fi;
       }
       g.visible = true;
       g.position.set(x, y, z);
