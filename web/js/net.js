@@ -39,6 +39,8 @@ export class Net {
     this.offset = null;   // serveur - client (ms)
     this.rtt = 0;
     this.pingTimer = 0;
+    this.watchTimer = 0;
+    this.lastMsgAt = 0;
     this.open = false;
   }
 
@@ -46,12 +48,17 @@ export class Net {
 
   connect() {
     return new Promise((resolve, reject) => {
+      // on détache l'ancienne connexion : sa fermeture tardive ne doit pas toucher la nouvelle
+      if (this.ws) { this.ws.onclose = this.ws.onmessage = this.ws.onerror = null; try { this.ws.close(); } catch { /* */ } }
+      clearInterval(this.pingTimer);
+      clearInterval(this.watchTimer);
       const ws = new WebSocket(WS_URL);
       this.ws = ws;
       const fail = setTimeout(() => { try { ws.close(); } catch { /* */ } reject(new Error('timeout')); }, 10000);
       ws.onopen = () => {
         clearTimeout(fail);
         this.open = true;
+        this.lastMsgAt = Date.now();
         this._startPing();
         resolve();
       };
@@ -59,9 +66,11 @@ export class Net {
       ws.onclose = () => {
         this.open = false;
         clearInterval(this.pingTimer);
+        clearInterval(this.watchTimer);
         this.handlers.get('close')?.();
       };
       ws.onmessage = (e) => {
+        this.lastMsgAt = Date.now();
         let m;
         try { m = JSON.parse(e.data); } catch { return; }
         if (m.t === 'pong') return this._onPong(m);
@@ -77,6 +86,7 @@ export class Net {
   close() {
     this.handlers.delete('close');
     clearInterval(this.pingTimer);
+    clearInterval(this.watchTimer);
     try { this.ws?.close(); } catch { /* */ }
     this.open = false;
   }
@@ -85,6 +95,18 @@ export class Net {
     const ping = () => this.send({ t: 'ping', c: Date.now() });
     ping(); setTimeout(ping, 250); setTimeout(ping, 600);
     this.pingTimer = setInterval(ping, 2000);
+    // Le serveur répond aux pings toutes les 2 s : plus rien depuis 7 s = connexion morte (portable en veille, proxy bloqué...)
+    clearInterval(this.watchTimer);
+    this.watchTimer = setInterval(() => { if (this.open && Date.now() - this.lastMsgAt > 7000) this._dead(); }, 2000);
+  }
+
+  _dead() {
+    const ws = this.ws;
+    this.open = false;
+    clearInterval(this.pingTimer);
+    clearInterval(this.watchTimer);
+    if (ws) { ws.onclose = ws.onmessage = ws.onerror = null; try { ws.close(); } catch { /* */ } }
+    this.handlers.get('close')?.();
   }
 
   _onPong(m) {

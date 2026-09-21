@@ -31,7 +31,13 @@ export const MODES = {
   duel: { id: 'duel', label: '1v1', desc: 'Duel, premier à 10 frags', max: 2, fill: 2, killLimit: 10, teams: false },
   tdm: { id: 'tdm', label: 'Match à mort par équipe', desc: 'Rouge contre Bleu, 30 frags', max: 10, fill: 8, killLimit: 30, teams: true },
   ffa: { id: 'ffa', label: 'Chacun pour soi', desc: 'Tous contre tous, 20 frags', max: 10, fill: 6, killLimit: 20, teams: false },
+  gun: { id: 'gun', label: 'Gun Game', desc: 'Une arme par niveau, le couteau gagne', max: 10, fill: 6, killLimit: 0, teams: false },
 };
+
+// Gun Game : arme de chaque niveau (index dans WEAPONS). Un frag = niveau suivant ; tuer au dernier niveau = victoire.
+// Le couteau reste toujours utilisable : un frag au couteau fait monter d'un niveau ET fait descendre la victime.
+export const GUN_ORDER = [0, 1, 3, 2, 4]; // fusil d'assaut, pompe, revolver, sniper, couteau
+export const KNIFE = 4;
 
 // Index = touche du clavier (1..5). "range" = portée max en mètres (mêlée uniquement).
 // falloff = [début, fin, multiplicateur minimum]

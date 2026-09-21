@@ -18,6 +18,25 @@ let game = null;
 let busy = false;
 let cancelled = false;
 let settingsOpen = false;
+let reconnecting = false;
+let welcomeWaiter = null;
+
+// Jeton de reconnexion : permet de reprendre sa place (score, équipe, niveau) après une coupure
+const token = (() => {
+  const fresh = () => (crypto.randomUUID?.() || `${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`);
+  try {
+    let t = sessionStorage.getItem('fpixel-token');
+    if (!t) { t = fresh(); sessionStorage.setItem('fpixel-token', t); }
+    return t;
+  } catch { return fresh(); }
+})();
+
+function joinMsg() {
+  return {
+    t: 'join', name: settings.name, mode: settings.mode, room: settings.room.trim(),
+    bots: settings.bots ? (settings.fill || 1) : 0, diff: settings.diff, limit: settings.limit, token,
+  };
+}
 
 // ---------------------------------------------------------------- menu ----
 $('name').value = settings.name;
@@ -34,6 +53,12 @@ selectMode(settings.mode);
 
 $('bots').checked = settings.bots !== false;
 $('bots').addEventListener('change', () => { settings.bots = $('bots').checked; saveSettings(settings); });
+for (const [id, key, num] of [['diff', 'diff', false], ['limit', 'limit', true], ['fill', 'fill', true]]) {
+  const el = $(id);
+  el.value = String(settings[key]);
+  if (el.value !== String(settings[key])) el.selectedIndex = 0; // valeur enregistrée qui n'existe plus
+  el.addEventListener('change', () => { settings[key] = num ? Number(el.value) : el.value; saveSettings(settings); });
+}
 $('name').addEventListener('input', () => { settings.name = $('name').value; saveSettings(settings); });
 $('room').addEventListener('input', () => { settings.room = $('room').value; saveSettings(settings); });
 $('name').addEventListener('keydown', (e) => { if (e.key === 'Enter') play(); });
@@ -66,6 +91,8 @@ function showMenu(msg) {
   $('menu').classList.remove('hidden');
   $('touch').classList.add('hidden');
   $('pause').classList.add('hidden');
+  $('reconnect').classList.add('hidden');
+  reconnecting = false;
   $('play').disabled = false;
   $('play').textContent = 'JOUER';
   busy = false;
@@ -111,21 +138,51 @@ async function play() {
   if (!awake) return showMenu('Serveur injoignable. Réessaie dans un instant.');
 
   net.on('welcome', onWelcome);
-  net.on('error', (m) => { net.close(); showMenu(m.msg || 'Erreur serveur'); });
-  net.on('close', () => {
-    if (game?.running) { game.stop(); showMenu('Connexion perdue avec le serveur.'); }
+  net.on('error', (m) => {
+    net.close();
+    if (game?.running) game.stop();
+    showMenu(m.msg || 'Erreur serveur');
   });
+  net.on('close', () => { if (game?.running) reconnect(); });
   try {
     await net.connect();
   } catch (e) {
     return showMenu(`Connexion impossible (${SERVER_HOST}).`);
   }
-  net.send({ t: 'join', name, mode: settings.mode, room: settings.room.trim(), bots: settings.bots ? 1 : 0 });
+  net.send(joinMsg());
 }
 $('play').addEventListener('click', play);
 
+// Connexion perdue en pleine partie : on retente tout seul (le Space peut redémarrer ou se réveiller)
+async function reconnect() {
+  if (reconnecting) return;
+  reconnecting = true;
+  game.setPaused(true);
+  $('reconnect').classList.remove('hidden');
+  const t0 = Date.now();
+  let ok = false;
+  for (let attempt = 1; game.running && Date.now() - t0 < 120000; attempt++) {
+    $('reco-sub').textContent = `tentative ${attempt}…`;
+    await new Promise((r) => setTimeout(r, Math.min(1000 * attempt, 4000)));
+    if (!game.running) break;
+    if (!(await fetchLobby(5000))) continue;          // serveur pas encore revenu
+    try { await net.connect(); } catch { continue; }
+    ok = await new Promise((resolve) => {
+      const timer = setTimeout(() => resolve(false), 6000);
+      welcomeWaiter = () => { clearTimeout(timer); resolve(true); };
+      net.send(joinMsg());
+    });
+    welcomeWaiter = null;
+    if (ok) break;
+  }
+  $('reconnect').classList.add('hidden');
+  reconnecting = false;
+  if (!ok && game.running) { game.stop(); showMenu('Connexion perdue avec le serveur.'); }
+}
+
 function onWelcome(m) {
   $('menu').classList.add('hidden');
+  welcomeWaiter?.();
   game.start(m);
   game.setPaused(false);
   input.enabled = true;
@@ -162,6 +219,7 @@ $('resume').addEventListener('click', () => {
   else input.requestLock();
 });
 $('quit').addEventListener('click', () => {
+  net.send({ t: 'leave' });   // départ volontaire : le serveur libère la place tout de suite
   net.close();
   game.stop();
   if (document.pointerLockElement) document.exitPointerLock();

@@ -3,11 +3,10 @@
 import { stepPlayer } from '../web/js/physics.js';
 import { BOXES } from '../web/shared/map.js';
 import { rayAABB, lookDir, clamp } from '../web/shared/util.js';
-import { EYE_HEIGHT, WALK_SPEED, WEAPONS, PLAYER_RADIUS, PLAYER_HEIGHT } from '../web/shared/config.js';
+import { EYE_HEIGHT, WALK_SPEED, WEAPONS, PLAYER_RADIUS, PLAYER_HEIGHT, GUN_ORDER } from '../web/shared/config.js';
 
 export const BOT_NAMES = ['Léo', 'Maya', 'Nico', 'Zoé', 'Enzo', 'Lina', 'Hugo', 'Jade', 'Noah', 'Emma', 'Tom', 'Chloé'];
 
-const SIGHT = 70;
 //            fusil d'assaut, pompe, sniper, revolver, couteau
 const PREF = [14, 5, 32, 10, 1.8];   // distance de combat préférée
 const RANGE = [60, 16, 100, 45, 2.2]; // ne tire pas au-delà
@@ -22,10 +21,26 @@ for (let x = -26; x <= 26; x += 4) {
   }
 }
 
-export function newBotAI() {
+// Réglages par difficulté. err = imprécision de visée (rad), turn = vitesse de rotation (rad/s),
+// react = temps de réaction (ms), head = chance de viser la tête, pause = pause entre rafales (ms).
+export const DIFFS = {
+  easy:   { skill: [0.35, 0.5], react: [800, 1100], err: [0.08, 0.09],   turn: [1.8, 2.4], head: 0,    pause: [500, 1000], sight: 45, speed: 0.75, tol: 0.12 },
+  normal: { skill: [0.65, 1.0], react: [350, 600],  err: null,           turn: null,       head: 0.3,  pause: [300, 800],  sight: 70, speed: 0.85, tol: 0.09 },
+  hard:   { skill: [0.9, 1.0],  react: [150, 300],  err: [0.012, 0.02],  turn: [7, 8.5],   head: 0.55, pause: [150, 400],  sight: 95, speed: 0.95, tol: 0.06 },
+};
+
+export function newBotAI(diff = 'normal') {
+  const D = DIFFS[diff] || DIFFS.normal;
+  const r = (a, b) => a + Math.random() * (b - a);
+  const skill = r(D.skill[0], D.skill[1]);
   return {
-    skill: 0.65 + Math.random() * 0.35,   // 0.65 = mou, 1 = bon
-    target: null, seenAt: 0, nextScan: 0, reaction: 350 + Math.random() * 250,
+    diff, skill,
+    reaction: r(D.react[0], D.react[1]),
+    err: D.err ? r(D.err[0], D.err[1]) : 0.06 - 0.035 * skill,
+    maxTurn: D.turn ? r(D.turn[0], D.turn[1]) : 2.5 + 3 * skill,
+    headChance: diff === 'normal' ? D.head * skill : D.head,
+    pauseRange: D.pause, sight: D.sight, speedMul: D.speed, tol: D.tol,
+    target: null, seenAt: 0, nextScan: 0,
     wp: null, lastPos: { x: 0, z: 0 }, lastCheck: 0,
     strafe: 1, strafeUntil: 0, mid: 0, aimHead: false, burstLeft: 4, pause: 0,
   };
@@ -38,12 +53,12 @@ function angDiff(a, b) {
   return d;
 }
 
-function canSee(b, t) {
+function canSee(b, t, sight) {
   const ex = b.x, ey = b.y + EYE_HEIGHT, ez = b.z;
   for (const ty of [t.y + 1.0, t.y + 1.6]) {
     const dx = t.x - ex, dy = ty - ey, dz = t.z - ez;
     const d = Math.hypot(dx, dy, dz);
-    if (d > SIGHT) return false;
+    if (d > sight) return false;
     const ux = dx / d, uy = dy / d, uz = dz / d;
     let blocked = false;
     for (const bx of BOXES) {
@@ -61,7 +76,7 @@ function pickTarget(room, b, now) {
     if (q === b || !q.alive || now < q.protectUntil) continue;
     if (room.cfg.teams && q.team === b.team) continue;
     const d = Math.hypot(q.x - b.x, q.z - b.z);
-    if (d < bestD && canSee(b, q)) { best = q; bestD = d; }
+    if (d < bestD && canSee(b, q, b.ai.sight)) { best = q; bestD = d; }
   }
   return best;
 }
@@ -73,11 +88,13 @@ function scan(room, b, now) {
   if (t && (!ai.target || ai.target.id !== t.id || !ai.target.alive)) {
     ai.seenAt = now;                                   // nouvelle cible : temps de réaction
     ai.mid = Math.random() < 0.7 ? 0 : 3;              // fusil d'assaut ou revolver à moyenne distance
-    ai.aimHead = Math.random() < 0.3 * ai.skill;
+    ai.aimHead = Math.random() < ai.headChance;
   }
   if (!t) ai.seenAt = 0;
   ai.target = t;
-  if (t) {
+  if (room.mode === 'gun') {
+    b.weapon = GUN_ORDER[Math.min(b.level, GUN_ORDER.length - 1)];   // en Gun Game l'arme dépend du niveau
+  } else if (t) {
     const d = Math.hypot(t.x - b.x, t.z - b.z);
     b.weapon = d < 9 ? 1 : d < 38 ? ai.mid : 2;
   } else {
@@ -94,7 +111,7 @@ export function botStep(room, b, now, dt) {
   let fw = 0, st = 0, jump = false, fire = null;
   let desYaw = b.yaw, desPitch = 0;
   const eyeY = b.y + EYE_HEIGHT;
-  const maxTurn = 2.5 + 3 * ai.skill; // rad/s
+  const maxTurn = ai.maxTurn; // rad/s
 
   if (t) {
     const dx = t.x - b.x, dz = t.z - b.z, d = Math.hypot(dx, dz);
@@ -126,24 +143,24 @@ export function botStep(room, b, now, dt) {
   let wx = fx * fw + rx * st, wz = fz * fw + rz * st;
   const l = Math.hypot(wx, wz);
   if (l > 1) { wx /= l; wz /= l; }
-  const speed = WALK_SPEED * WEAPONS[b.weapon].speed * (t ? 0.85 : 0.7);
+  const speed = WALK_SPEED * WEAPONS[b.weapon].speed * (t ? ai.speedMul : ai.speedMul * 0.8);
   stepPlayer(b, dt / 2, wx, wz, speed, jump);
   stepPlayer(b, dt / 2, wx, wz, speed, false);
 
   // tir : réaction écoulée, bien aligné, à portée
   if (t && now - ai.seenAt >= ai.reaction && now >= ai.pause) {
     const d = Math.hypot(t.x - b.x, t.z - b.z);
-    const tol = b.weapon === 2 ? 0.035 : 0.09;
+    const tol = b.weapon === 2 ? ai.tol * 0.4 : ai.tol;
     if (Math.abs(angDiff(b.yaw, desYaw)) < tol && Math.abs(desPitch - b.pitch) < tol + 0.03 && d <= RANGE[b.weapon] && now >= b.nextFire - 30) {
       const w = WEAPONS[b.weapon];
-      const e = 0.06 - 0.035 * ai.skill; // imprécision de visée
+      const e = ai.err; // imprécision de visée
       const [ux, uy, uz] = lookDir(b.yaw + (Math.random() - 0.5) * 2 * e, b.pitch + (Math.random() - 0.5) * 2 * e);
       fire = {
         w: b.weapon, ox: b.x, oy: b.y + EYE_HEIGHT, oz: b.z, dx: ux, dy: uy, dz: uz,
         seed: (Math.random() * 2147483647) | 0, sc: w.zoom ? 1 : 0, rt: now,
       };
       if (w.auto && --ai.burstLeft <= 0) {        // rafales : quelques balles puis une pause
-        ai.pause = now + 300 + Math.random() * 500;
+        ai.pause = now + ai.pauseRange[0] + Math.random() * (ai.pauseRange[1] - ai.pauseRange[0]);
         ai.burstLeft = 3 + ((Math.random() * 5) | 0);
       }
     }

@@ -28,7 +28,7 @@ export const WS_URL = `${secure ? 'wss' : 'ws'}://${SERVER_HOST}/ws`;
 const KEY = 'fpixel-settings-v2';
 const OLD_KEY = 'fpixel-settings-v1';
 const DEFAULTS = {
-  name: '', mode: 'ffa', room: '', bots: true, autoFire: true, minimap: true,
+  name: '', mode: 'ffa', room: '', bots: true, diff: 'normal', limit: 0, fill: 0, autoFire: true, minimap: true,
   sens: 1, sensScope: 1, fov: 90, scale: isTouch ? 0.5 : 0.6, volume: 0.6, invertY: false,
 };
 

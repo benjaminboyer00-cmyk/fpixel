@@ -45,6 +45,8 @@
     <button class="tbtn small" data-act="pause" id="t-pause">⚙</button>
   </div>
 
+  <div id="reconnect" class="hidden"><b>Connexion perdue</b><span id="reco-sub">reconnexion…</span><small>Échap → pause → Quitter la partie pour abandonner</small></div>
+
   <div id="portrait-hint">📱 Tourne ton téléphone en mode paysage</div>
 
   <!-- ============================ Menu ============================ -->
@@ -61,13 +63,37 @@
         <button class="mode" data-mode="duel"><b>⚔ 1v1</b><small>Duel · 10 frags</small><em data-count="duel"></em></button>
         <button class="mode" data-mode="tdm"><b>🔴🔵 Équipes</b><small>Rouge vs Bleu · 30 frags</small><em data-count="tdm"></em></button>
         <button class="mode" data-mode="ffa"><b>💀 Chacun pour soi</b><small>Tous contre tous · 20 frags</small><em data-count="ffa"></em></button>
+        <button class="mode" data-mode="gun"><b>🔫 Gun Game</b><small>Une arme par niveau · le couteau gagne</small><em data-count="gun"></em></button>
       </div>
 
       <label class="field f-room">Salon privé <span class="opt">(optionnel — même nom = même salon)</span>
         <input id="room" type="text" maxlength="12" placeholder="ex : potes" autocomplete="off" spellcheck="false">
       </label>
 
-      <label class="check f-bots"><input id="bots" type="checkbox"> Compléter la partie avec des bots</label>
+      <div class="f-bots">
+        <label class="check"><input id="bots" type="checkbox"> Compléter avec des bots</label>
+        <select id="diff" aria-label="Difficulté des bots">
+          <option value="easy">Bots faciles</option>
+          <option value="normal">Bots normaux</option>
+          <option value="hard">Bots difficiles</option>
+        </select>
+      </div>
+      <details class="opts">
+        <summary>Options du salon <small>(appliquées par celui qui crée le salon)</small></summary>
+        <label class="field">Objectif (frags pour gagner)
+          <select id="limit">
+            <option value="0">Par défaut selon le mode</option>
+            <option value="5">5</option><option value="10">10</option><option value="20">20</option>
+            <option value="30">30</option><option value="50">50</option>
+          </select>
+        </label>
+        <label class="field">Joueurs visés (humains + bots)
+          <select id="fill">
+            <option value="0">Auto selon le mode</option>
+            <option value="4">4</option><option value="6">6</option><option value="8">8</option><option value="10">10</option>
+          </select>
+        </label>
+      </details>
 
       <button id="play" class="btn primary">JOUER</button>
       <button id="open-settings" class="btn">Réglages (sensibilité…)</button>

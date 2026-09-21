@@ -1,7 +1,7 @@
 // Boucle de jeu : joueur local (prédit côté client), autres joueurs (interpolés), tirs, effets, HUD.
 import * as THREE from 'three';
 import {
-  TICK_MS, INTERP_MS, EYE_HEIGHT, MAX_HP, RESPAWN_MS, WALK_SPEED, WEAPONS,
+  TICK_MS, INTERP_MS, EYE_HEIGHT, MAX_HP, RESPAWN_MS, WALK_SPEED, WEAPONS, GUN_ORDER, KNIFE,
 } from '../shared/config.js';
 import { BOXES } from '../shared/map.js';
 import { mulberry32, applySpread, lookDir, clamp, angleLerp, rayAABB } from '../shared/util.js';
@@ -101,6 +101,8 @@ export class Game {
     this.room = welcome.room;
     this.mode = welcome.room.mode;
     this.limit = welcome.room.limit;
+    this.gun = welcome.room.mode === 'gun';
+    const mine = welcome.players.find((p) => p.id === welcome.id);
     this.state = welcome.state;
     this.winner = welcome.win;
     this.until = welcome.until;
@@ -109,12 +111,14 @@ export class Game {
 
     this.me = {
       x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, onGround: true, yaw: 0, pitch: 0,
-      hp: MAX_HP, alive: false, spawned: false, weapon: 0, ammo: WEAPONS.map((w) => w.mag),
+      level: mine?.lvl ?? 0,
+      hp: MAX_HP, alive: false, spawned: false, weapon: this.gun ? GUN_ORDER[mine?.lvl ?? 0] : 0, ammo: WEAPONS.map((w) => w.mag),
       reloadUntil: 0, nextFire: 0, switchUntil: 0, scoped: false, scopeToggle: false,
       respawnAt: 0, killer: null, deadT: 0, prot: 0, lastSend: 0,
     };
     for (const p of welcome.players) this._addPlayer(p);
-    this.viewmodel.setWeapon(0);
+    this.viewmodel.setWeapon(this.me.weapon);
+    this.hud.setAllowed(this._allowedSet());
     this.fov = 0;
     this._applyFov(true);
     this.scoreDirty = true;
@@ -163,7 +167,7 @@ export class Game {
     model.group.visible = false;
     this.scene.add(model.group);
     p = {
-      id: info.id, name: info.name, team: info.team, bot: !!info.bot, k: info.k || 0, d: info.d || 0,
+      id: info.id, name: info.name, team: info.team, bot: !!info.bot, k: info.k || 0, d: info.d || 0, lvl: info.lvl || 0,
       hp: info.hp ?? 0, weapon: info.w ?? 0, prot: 0, snaps: [], model, sprite: null, lastX: 0, lastZ: 0, walk: 0,
     };
     // Nom au-dessus de la tête : seulement les coéquipiers en mode équipes (pas de "wallhack")
@@ -228,9 +232,10 @@ export class Game {
     n.on('dmg', (m) => this._onDamage(m));
     n.on('kill', (m) => this._onKill(m));
     n.on('score', (m) => {
-      for (const [id, k, d] of m.p) {
+      for (const [id, k, d, lvl] of m.p) {
         const p = this.players.get(id);
-        if (p) { p.k = k; p.d = d; }
+        if (p) { p.k = k; p.d = d; p.lvl = lvl ?? 0; }
+        if (id === this.myId && this.gun) this._setLevel(lvl ?? 0);
       }
       this.teamKills = m.team;
       this.scoreDirty = true;
@@ -256,6 +261,7 @@ export class Game {
     me.hp = m.hp; me.alive = true; me.spawned = true; me.deadT = 0; me.killer = null;
     me.ammo = WEAPONS.map((w) => w.mag);
     me.reloadUntil = 0; me.nextFire = 0; me.scopeToggle = false;
+    if (this.gun && !this._allowed(me.weapon)) this._switchTo(GUN_ORDER[me.level], performance.now());
     this.hud.death(false);
     if (this.state !== 'waiting') sfx.play('spawn');
   }
@@ -366,8 +372,8 @@ export class Game {
       // --- changement d'arme ---
       let want = inp.takeWeapon();
       const cyc = inp.takeCycle();
-      if (cyc) want = (((me.weapon + Math.sign(cyc)) % WEAPONS.length) + WEAPONS.length) % WEAPONS.length;
-      if (want !== null && want !== me.weapon && WEAPONS[want]) this._switchTo(want, now);
+      if (cyc) want = this._cycleWeapon(Math.sign(cyc));
+      if (want !== null && want !== me.weapon && WEAPONS[want] && this._allowed(want)) this._switchTo(want, now);
 
       // --- rechargement ---
       if (inp.takeReload()) this._startReload(now);
@@ -438,6 +444,32 @@ export class Game {
       if (body >= 0 || head >= 0) return true;
     }
     return false;
+  }
+
+  // ---- Gun Game : l'arme dépend du niveau, le couteau reste toujours utilisable ----
+  _allowed(i) { return !this.gun || i === GUN_ORDER[this.me.level] || i === KNIFE; }
+  _allowedSet() { return this.gun ? new Set([GUN_ORDER[this.me.level], KNIFE]) : null; }
+
+  _cycleWeapon(dir) {
+    let i = this.me.weapon;
+    for (let k = 0; k < WEAPONS.length; k++) {
+      i = (i + dir + WEAPONS.length) % WEAPONS.length;
+      if (this._allowed(i)) return i;
+    }
+    return this.me.weapon;
+  }
+
+  _setLevel(lvl) {
+    const me = this.me;
+    if (!this.gun || lvl === me.level) return;
+    const up = lvl > me.level;
+    me.level = lvl;
+    const w = GUN_ORDER[lvl];
+    me.ammo[w] = WEAPONS[w].mag;
+    this._switchTo(w, performance.now());
+    this.hud.setAllowed(this._allowedSet());
+    this.hud.hint(`${up ? 'Niveau supérieur' : 'Niveau perdu'} : ${lvl + 1}/${GUN_ORDER.length} — ${WEAPONS[w].name}`, 3500);
+    if (up) sfx.play('spawn');
   }
 
   _switchTo(i, now) {

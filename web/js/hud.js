@@ -1,5 +1,5 @@
 // Tout ce qui est affiché par-dessus le jeu (DOM). Les noms de joueurs passent par textContent.
-import { WEAPONS, TEAM_COLORS, FFA_COLORS, MODES } from '../shared/config.js';
+import { WEAPONS, TEAM_COLORS, FFA_COLORS, MODES, GUN_ORDER } from '../shared/config.js';
 
 const $ = (id) => document.getElementById(id);
 const teamName = { red: 'ROUGE', blue: 'BLEU' };
@@ -39,6 +39,12 @@ export class Hud {
       tbar.append(t);
       this.tslots.push(t);
     });
+  }
+
+  // Gun Game : seules certaines armes sont utilisables (null = toutes)
+  setAllowed(set) {
+    this.slots.forEach((s, k) => s.classList.toggle('off', !!set && !set.has(k)));
+    this.tslots.forEach((s, k) => s.classList.toggle('off', !!set && !set.has(k)));
   }
 
   show() { this.root.classList.remove('hidden'); }
@@ -144,6 +150,11 @@ export class Hud {
         el('span', { textContent: `ROUGE ${teamKills.red}`, style: `color:${'#ff6b70'}` }), ' — ',
         el('span', { textContent: `${teamKills.blue} BLEU`, style: `color:${'#6ea0ff'}` }));
       sub.textContent = `Premier à ${limit} frags${me?.team ? ` · tu es ${teamName[me.team]}` : ''}`;
+    } else if (mode === 'gun') {
+      const lvl = me?.lvl ?? 0;
+      line.textContent = `Niveau ${lvl + 1}/${GUN_ORDER.length} · ${WEAPONS[GUN_ORDER[lvl]].name}`;
+      const top = [...players].sort((a, b) => (b.lvl - a.lvl) || (b.k - a.k))[0];
+      sub.textContent = top ? `Leader : ${top.name} (niveau ${top.lvl + 1}) · tue au niveau ${GUN_ORDER.length} pour gagner` : '';
     } else if (mode === 'duel') {
       const foe = players.find((p) => p.id !== meId);
       line.textContent = foe ? `Toi ${me?.k ?? 0} — ${foe.k} ${foe.name}` : 'Duel 1v1';
@@ -159,12 +170,14 @@ export class Hud {
 
   renderScoreboard(mode, players, teamKills, meId) {
     const box = $('scoreboard');
+    const gun = mode === 'gun';
     const table = (list, title, color) => {
       const t = el('table');
-      t.append(el('tr', {}, el('th', { textContent: 'Joueur' }), el('th', { textContent: 'Frags' }), el('th', { textContent: 'Morts' })));
-      for (const p of [...list].sort((a, b) => b.k - a.k || a.d - b.d)) {
+      t.append(el('tr', {}, el('th', { textContent: 'Joueur' }), ...(gun ? [el('th', { textContent: 'Niveau' })] : []), el('th', { textContent: 'Frags' }), el('th', { textContent: 'Morts' })));
+      const order = gun ? (a, b) => (b.lvl - a.lvl) || (b.k - a.k) : (a, b) => b.k - a.k || a.d - b.d;
+      for (const p of [...list].sort(order)) {
         const tr = el('tr', p.id === meId ? { className: 'me' } : {});
-        tr.append(el('td', { textContent: p.name, style: `color:${playerColor(mode, p)}` }), el('td', { textContent: p.k }), el('td', { textContent: p.d }));
+        tr.append(el('td', { textContent: p.name, style: `color:${playerColor(mode, p)}` }), ...(gun ? [el('td', { textContent: `${p.lvl + 1}/${GUN_ORDER.length}` })] : []), el('td', { textContent: p.k }), el('td', { textContent: p.d }));
         t.append(tr);
       }
       const wrap = el('div');

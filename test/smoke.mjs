@@ -4,10 +4,12 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import WebSocket from 'ws';
+import { WEAPONS, GUN_ORDER, KNIFE } from '../web/shared/config.js';
+import { newBotAI } from '../server/bots.js';
 
 const PORT = 7861;
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
-const srv = spawn('node', ['server/index.js'], { cwd: root, env: { ...process.env, PORT: String(PORT), KILL_LIMIT: '2' }, stdio: 'inherit' });
+const srv = spawn('node', ['server/index.js'], { cwd: root, env: { ...process.env, PORT: String(PORT), KILL_LIMIT: '2', RESPAWN_MS: '600', PROTECT_MS: '300', GRACE_MS: '1500' }, stdio: 'inherit' });
 process.on('exit', () => srv.kill());
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -30,7 +32,7 @@ class Bot {
     await new Promise((r) => this.ws.on('open', r));
   }
   send(o) { this.ws.send(JSON.stringify(o)); }
-  join(mode, room, bots = 0) { this.send({ t: 'join', name: this.name, mode, room, bots }); }
+  join(mode, room, bots = 0, extra = {}) { this.send({ t: 'join', name: this.name, mode, room, bots, ...extra }); }
   waitFor(type, pred, ms = 5000) {
     const old = this.log.find((m) => m.t === type && (!pred || pred(m)));
     if (old) return Promise.resolve(old);
@@ -207,6 +209,150 @@ async function main() {
     N.ws.close();
   }
   await sleep(300);
+
+  // ---------- OPTIONS DE SALON / DIFFICULTÉ ----------
+  console.log('\n[options de salon]');
+  {
+    const easy = newBotAI('easy'), norm = newBotAI('normal'), hard = newBotAI('hard');
+    check('difficulté : réaction facile > normal > difficile', easy.reaction > norm.reaction && norm.reaction > hard.reaction, `${easy.reaction | 0} / ${norm.reaction | 0} / ${hard.reaction | 0} ms`);
+    check('difficulté : précision facile < normal < difficile (erreur de visée)', easy.err > norm.err && norm.err > hard.err, `${easy.err.toFixed(3)} / ${norm.err.toFixed(3)} / ${hard.err.toFixed(3)}`);
+    check('difficulté inconnue = normal', newBotAI('nimporte').diff === 'nimporte' && newBotAI('nimporte').maxTurn > 0);
+
+    const a = new Bot('OptA'); await a.connect(); a.join('ffa', 'optA', 0, { limit: 3 });
+    const wa = await a.waitFor('welcome');
+    check('limite de frags choisie à la création du salon', wa.room.limit === 3, JSON.stringify(wa.room));
+    const b = new Bot('OptB'); await b.connect(); b.join('ffa', 'optB', 4, { diff: 'hard' });
+    const wb = await b.waitFor('welcome');
+    await sleep(500);
+    check('difficulté du salon transmise au client', wb.room.diff === 'hard' && wb.room.fill === 4, JSON.stringify(wb.room));
+    check('« joueurs visés » = 4 : 1 humain + 3 bots', b.count('pjoin', (m) => m.p.bot) === 3, `${b.count('pjoin', (m) => m.p.bot)} bots`);
+    const c1 = new Bot('Auto1'); await c1.connect(); c1.join('ffa', '', 0);
+    const c2 = new Bot('Auto2'); await c2.connect(); c2.join('ffa', '', 0, { diff: 'hard' });
+    const w1 = await c1.waitFor('welcome'), w2 = await c2.waitFor('welcome');
+    check('salons automatiques : options différentes = salons différents', w1.room.id !== w2.room.id, `${w1.room.id} / ${w2.room.id}`);
+    const c3 = new Bot('Auto3'); await c3.connect(); c3.join('ffa', '', 0);
+    const w3 = await c3.waitFor('welcome');
+    check('salons automatiques : mêmes options = même salon', w3.room.id === w1.room.id);
+    [a, b, c1, c2, c3].forEach((x) => x.ws.close());
+    await sleep(300);
+  }
+
+  // ---------- RECONNEXION ----------
+  console.log('\n[reconnexion]');
+  {
+    const R1 = new Bot('Rec1'), R2 = new Bot('Rec2');
+    await R1.connect(); R1.join('tdm', 'recon', 0, { token: 'tok-R1' });
+    const w1 = await R1.waitFor('welcome');
+    await R2.connect(); R2.join('tdm', 'recon', 0, { token: 'tok-R2' });
+    await R2.waitFor('welcome');
+    await sleep(300);
+    R1.ws.terminate(); // coupure brutale
+    await sleep(300);
+    const R1b = new Bot('Rec1'); await R1b.connect(); R1b.join('tdm', 'recon', 0, { token: 'tok-R1' });
+    const w1b = await R1b.waitFor('welcome');
+    check('reconnexion : même identifiant et même équipe', w1b.id === w1.id && w1b.team === w1.team && w1b.back === true, `${w1.id}/${w1b.id} ${w1.team}/${w1b.team}`);
+    await R1b.waitFor('spawn');
+    check('reconnexion : le joueur réapparaît', true);
+    await sleep(400);
+    check('reconnexion : les autres ne voient pas de départ', !R2.has('pleave', (m) => m.id === w1.id));
+    check('reconnexion : une seule fois dans le salon', w1b.players.filter((p) => p.id === w1.id).length === 1);
+
+    // pas de retour : retiré après le délai de grâce (1,5 s dans ce test)
+    R1b.ws.terminate();
+    const left = await R2.waitFor('pleave', (m) => m.id === w1.id, 5000).catch(() => null);
+    check('sans retour : le joueur est retiré après le délai de grâce', !!left);
+
+    // départ volontaire : retiré tout de suite
+    const R3 = new Bot('Rec3'); await R3.connect(); R3.join('tdm', 'recon', 0, { token: 'tok-R3' });
+    const w3 = await R3.waitFor('welcome');
+    await sleep(200);
+    R3.send({ t: 'leave' });
+    const t0 = Date.now();
+    const left3 = await R2.waitFor('pleave', (m) => m.id === w3.id, 1000).catch(() => null);
+    check('« leave » : retiré immédiatement (pas de délai de grâce)', !!left3 && Date.now() - t0 < 700, `${Date.now() - t0} ms`);
+    R3.ws.close(); R2.ws.close();
+    await sleep(300);
+  }
+
+  // ---------- GUN GAME ----------
+  console.log('\n[gun game]');
+  {
+    const A = new Bot('GunA'), B = new Bot('GunB');
+    await A.connect(); A.join('gun', 'gunroom', 0);
+    const wA = await A.waitFor('welcome');
+    await B.connect(); B.join('gun', 'gunroom', 0);
+    const wB = await B.waitFor('welcome');
+    check('gun game : tout le monde commence au niveau 1', wA.players.every((p) => p.lvl === 0) && wA.room.limit === GUN_ORDER.length);
+    let bSpawns = 1;
+    await B.waitCount('spawn', 1);
+    const kills = () => A.count('kill', (m) => m.a === wA.id);
+    async function killWith(wi) {
+      await B.waitCount('spawn', bSpawns);
+      await sleep(450);                                  // fin de la protection d'apparition
+      const d = wi === KNIFE ? 1.5 : 5;
+      A.pos(-15, 0, -25, Math.PI, wi); B.pos(-15, 0, -25 + d, Math.PI, 0);
+      await sleep(250);
+      const before = kills();
+      for (let i = 0; i < 8 && kills() === before; i++) {
+        A.fire(wi, [-15, 1.6, -25], [0, 0, 1], { sc: 1, seed: i + 1 });
+        await sleep(WEAPONS[wi].interval + 40);
+      }
+      bSpawns++;
+      return kills() > before;
+    }
+
+    // mauvaise arme : le niveau 1 impose le fusil d'assaut (ou le couteau)
+    await sleep(500);
+    A.pos(-15, 0, -25, Math.PI, 3); B.pos(-15, 0, -20, Math.PI, 0);
+    await sleep(300);
+    A.fire(3, [-15, 1.6, -25], [0, 0, 1], { sc: 1 });
+    await sleep(400);
+    check('gun game : une arme qui n\'est pas celle du niveau ne tire pas', !A.has('hit'));
+
+    let ok = true;
+    for (let lvl = 0; lvl < GUN_ORDER.length; lvl++) {
+      const got = await killWith(GUN_ORDER[lvl]);
+      if (lvl < GUN_ORDER.length - 1) {
+        const sc = A.log.filter((m) => m.t === 'score').at(-1);
+        const mine = sc?.p.find((r) => r[0] === wA.id);
+        ok = ok && got && mine && mine[3] === lvl + 1;
+        if (!(got && mine && mine[3] === lvl + 1)) console.log(`   niveau ${lvl + 1} : kill=${got} score=${JSON.stringify(mine)}`);
+      } else {
+        ok = ok && got;
+      }
+    }
+    check('gun game : un frag = niveau suivant, arme du niveau à chaque fois', ok);
+    const end = await A.waitFor('state', (m) => m.s === 'ended', 3000).catch(() => null);
+    check('gun game : tuer au dernier niveau = victoire', !!end && end.win.id === wA.id, JSON.stringify(end));
+    A.ws.close(); B.ws.close();
+    await sleep(300);
+
+    // règle du couteau : le tueur monte d'un niveau, la victime descend
+    const K = new Bot('KnifeA'), V = new Bot('KnifeV');
+    await K.connect(); K.join('gun', 'knifeRoom', 0); const wK = await K.waitFor('welcome');
+    await V.connect(); V.join('gun', 'knifeRoom', 0); const wV = await V.waitFor('welcome');
+    await sleep(600);
+    // V monte d'un niveau en tuant K à l'arme du niveau 1
+    await K.waitCount('spawn', 1);
+    V.pos(-15, 0, -25, Math.PI, 0); K.pos(-15, 0, -20, Math.PI, 0);
+    await sleep(500);
+    for (let i = 0; i < 6 && !V.has('kill', (m) => m.a === wV.id); i++) { V.fire(0, [-15, 1.6, -25], [0, 0, 1], { seed: i + 1 }); await sleep(140); }
+    const vUp = V.log.filter((m) => m.t === 'score').at(-1)?.p.find((r) => r[0] === wV.id);
+    check('couteau : V est monté au niveau 2 en tuant K', vUp && vUp[3] === 1, JSON.stringify(vUp));
+    // K réapparaît et tue V au couteau (dans le dos)
+    await K.waitCount('spawn', 2);
+    await sleep(450);
+    K.pos(-15, 0, -25, Math.PI, 4); V.pos(-15, 0, -23.5, Math.PI, 1);
+    await sleep(300);
+    for (let i = 0; i < 4 && !K.has('kill', (m) => m.a === wK.id); i++) { K.fire(4, [-15, 1.6, -25], [0, 0, 1], { seed: i + 1 }); await sleep(470); }
+    await sleep(200);
+    const sc2 = K.log.filter((m) => m.t === 'score').at(-1);
+    const kRow = sc2.p.find((r) => r[0] === wK.id), vRow = sc2.p.find((r) => r[0] === wV.id);
+    check('couteau : le tueur monte d\'un niveau', kRow && kRow[3] === 1, JSON.stringify(kRow));
+    check('couteau : la victime redescend d\'un niveau', vRow && vRow[3] === 0, JSON.stringify(vRow));
+    K.ws.close(); V.ws.close();
+    await sleep(300);
+  }
 
   const lobby = await (await fetch(`http://localhost:${PORT}/api/rooms`)).json();
   check('salons vides supprimés', lobby.online === 0 && Object.values(lobby.modes).every((m) => m.rooms.length === 0), JSON.stringify(lobby));

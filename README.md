@@ -13,7 +13,15 @@ short_description: FPS pixel multijoueur pour jouer entre potes
 
 Petit FPS low-poly en ligne, pensé pour ~10 joueurs, sur PC (clavier/souris) et mobile (tactile).
 
-**Modes** : 1v1 (10 frags) · Match à mort par équipe (Rouge/Bleu, 30 frags) · Chacun pour soi (20 frags)
+**Modes** : 1v1 (10 frags) · Match à mort par équipe (Rouge/Bleu, 30 frags) · Chacun pour soi (20 frags) · **Gun Game**
+(une arme par niveau : fusil d'assaut → pompe → revolver → sniper → couteau ; un frag = niveau suivant, tuer au dernier niveau = victoire ;
+le couteau reste toujours utilisable : un frag au couteau te fait monter d'un niveau **et** fait descendre ta victime)
+
+**Options du salon** (choisies par celui qui crée le salon) : objectif en frags, nombre de joueurs visés (humains + bots), difficulté des bots (facile / normal / difficile).
+Les salons automatiques ne sont partagés qu'entre joueurs ayant les mêmes options.
+
+**Reconnexion automatique** : si la connexion saute (Wi-Fi, redémarrage du Space, portable en veille), le jeu se reconnecte tout seul et te rend ta place
+(score, équipe, niveau) tant que tu reviens dans les 20 s ; après un redémarrage complet du serveur tu rejoins un nouveau salon.
 **Armes** (touches 1-5 ou molette) : fusil d'assaut, fusil à pompe, sniper (clic droit = zoom), revolver, couteau (dans le dos = mort instantanée)
 
 **Bots** : le serveur complète les parties (1v1 : 1 bot en solo · équipes : 4v4 · chacun pour soi : 6 joueurs). Ils cèdent leur place dès qu'un humain arrive
@@ -45,7 +53,7 @@ Le serveur sert aussi le client : `https://benji4565-fpixel.hf.space` est jouabl
 ```bash
 npm install
 npm run dev          # http://localhost:7860 (serveur + client)
-node test/smoke.mjs  # bots WebSocket : duel, mur, headshot, équipes, fin de manche, IA des bots
+node test/smoke.mjs  # bots WebSocket : duel, mur, headshot, équipes, fin de manche, IA des bots, options, reconnexion, Gun Game
 node test/physics.mjs
 ```
 
@@ -57,7 +65,7 @@ node test/physics.mjs
 ## Réglages de jeu
 
 Tout est dans `web/shared/config.js` (dégâts, cadence, limite de frags, vitesse…) et `web/shared/map.js` (la carte).
-`KILL_LIMIT=2 npm run dev` force une limite de frags pour tester les fins de manche.
+`KILL_LIMIT=2 npm run dev` force une limite de frags pour tester les fins de manche ; `RESPAWN_MS`, `PROTECT_MS`, `GRACE_MS` raccourcissent les délais pour les tests.
 
 ## Comment ça marche (netcode)
 
