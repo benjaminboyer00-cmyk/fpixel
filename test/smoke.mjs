@@ -9,7 +9,7 @@ import { newBotAI } from '../server/bots.js';
 
 const PORT = 7861;
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
-const srv = spawn('node', ['server/index.js'], { cwd: root, env: { ...process.env, PORT: String(PORT), KILL_LIMIT: '2', RESPAWN_MS: '600', PROTECT_MS: '300', GRACE_MS: '1500' }, stdio: 'inherit' });
+const srv = spawn('node', ['server/index.js'], { cwd: root, env: { ...process.env, PORT: String(PORT), KILL_LIMIT: '2', STREAKS: '1,2,3', RESPAWN_MS: '600', PROTECT_MS: '300', GRACE_MS: '1500' }, stdio: 'inherit' });
 process.on('exit', () => srv.kill());
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -291,8 +291,8 @@ async function main() {
     check('classe Lourd : 150 PV et ses 4 armes à l\'apparition', H.spawn.maxHp === 150 && H.spawn.hp === 150 && H.spawn.loadout.join() === CLASSES.heavy.weapons.join() && H.spawn.speed === 0.88, JSON.stringify(H.spawn));
     const S = await mk('Eclaireur', 'scout');
     check('classe Éclaireur : 80 PV, plus rapide', S.spawn.maxHp === 80 && S.spawn.speed > 1);
-    const C = await mk('Triche', 'custom', [W.ROCKET, W.MINIGUN, W.EXCALIBUR, W.PORTAL, W.TESLA]);
-    check('classe perso trop chère côté serveur : Classique', C.spawn.loadout.length === 5 && C.spawn.maxHp === 100);
+    const C = await mk('Triche', 'custom', [W.ROCKET, W.MINIGUN, W.EXCALIBUR, W.PORTAL, W.LASER]);
+    check('classe perso trop chère ou avec une arme de série côté serveur : Classique', C.spawn.loadout.length === 5 && C.spawn.maxHp === 100 && C.spawn.loadout.join() === CLASSES.classic.weapons.join());
     await sleep(500);
     // une arme qui n'est pas dans la classe ne tire pas : l'Éclaireur n'a pas de fusil d'assaut
     S.pos(-15, 0, -25, Math.PI, W.SHOTGUN); H.pos(-15, 0, -22, Math.PI, W.SHOTGUN);
@@ -313,7 +313,7 @@ async function main() {
   console.log('\n[armes spéciales]');
   {
     const mk = async (name, loadout, x, z, room = 'wp') => {
-      const b = new Bot(name); await b.connect(); b.join('ffa', room, 0, { cls: 'custom', loadout });
+      const b = new Bot(name); await b.connect(); b.join('ffa', room, 0, { cls: 'custom', loadout, limit: 100 });
       const w = await b.waitFor('welcome'); b.id = w.id; await b.waitFor('spawn');
       b.at = (px, pz, yaw = Math.PI, wi = 0) => b.pos(px, 0, pz, yaw, wi);
       return b;
@@ -381,7 +381,7 @@ async function main() {
       A.at(-15, -25, Math.PI, W.GRAPPLE); B.at(-15, -15, Math.PI); await sleep(300);
       A.fire(W.GRAPPLE, [-15, 1.6, -25], [0, 0, 1]);
       const pull = await B.waitFor('pull', null, 2000).catch(() => null);
-      check('grappin : l\'ennemi touché reçoit une attraction vers le tireur', !!pull && Math.abs(pull.z - -25) < 3 && pull.sp === 21, JSON.stringify(pull));
+      check('grappin : l\'ennemi touché reçoit une attraction vers le tireur', !!pull && Math.abs(pull.z - -25) < 3 && pull.sp === 28, JSON.stringify(pull));
       check('grappin : petits dégâts', dmgOf(B)?.hp === 92, JSON.stringify(dmgOf(B)));
       await sleep(3700); // recharge
       B.at(20, 20, Math.PI);
@@ -389,6 +389,7 @@ async function main() {
       A.fire(W.GRAPPLE, [-15, 1.6, -25], [0, 0, -1]);
       const self = await A.waitFor('pull', null, 2000).catch(() => null);
       check('grappin sur un mur : c\'est le tireur qui est attiré', !!self && self.z < -25, JSON.stringify(self));
+      check('grappin sur un mur : le point d\'accroche est envoyé (corde)', !!self && Array.isArray(self.hook) && self.hook.length === 3, JSON.stringify(self));
       await closeAll(A, B);
     }
     // --- pistolet portail ---
@@ -417,16 +418,91 @@ async function main() {
       check('les portails disparaissent quand leur propriétaire part', !!off && off.o === A.id);
       await closeAll(B, C);
     }
-    // --- fusil à foudre : saute d'ennemi en ennemi ---
+    // --- carabine : un coup au jugé (sans viser), dégâts énormes ---
     {
-      const A = await mk('Ts-A', [W.TESLA]), B = await mk('Ts-B', [W.KNIFE]), C = await mk('Ts-C', [W.KNIFE]), D = await mk('Ts-D', [W.KNIFE]);
+      const A = await mk('Cb-A', [W.CARBINE]), B = await mk('Cb-B', [W.KNIFE]);
       await sleep(450);
-      A.at(-15, -25, Math.PI, W.TESLA); B.at(-15, -19, Math.PI); C.at(-12, -19, Math.PI); D.at(-9, -19, Math.PI);
-      await sleep(300);
-      A.fire(W.TESLA, [-15, 1.6, -25], [0, 0, 1]);
+      A.at(-15, -25, Math.PI, W.CARBINE); B.at(-15, -15, Math.PI); await sleep(300);
+      A.fire(W.CARBINE, [-15, 1.6, -25], [0, -0.06, 1], { sc: 0, seed: 7 });
       await sleep(400);
-      check('foudre : la chaîne touche 3 ennemis avec des dégâts décroissants', dmgOf(B)?.hp === 78 && dmgOf(C)?.hp === 85 && dmgOf(D)?.hp === 90, `${dmgOf(B)?.hp} ${dmgOf(C)?.hp} ${dmgOf(D)?.hp}`);
-      await closeAll(A, B, C, D);
+      check('carabine : tue en un coup au jugé à 10 m', B.has('kill', (m) => m.v === B.id));
+      await closeAll(A, B);
+    }
+    // --- onde d'Excalibur : traverse les murs, très longue à recharger ---
+    {
+      const A = await mk('Wv-A', [W.EXCALIBUR]), B = await mk('Wv-B', [W.KNIFE]);
+      await sleep(450);
+      A.at(16, 5, Math.PI, W.EXCALIBUR); B.at(16, 14, Math.PI); await sleep(300);   // le long mur (16,10) est entre les deux
+      A.fire(W.EXCALIBUR, [16, 1.6, 5], [0, 0, 1], { alt: 1 });
+      const wave = await B.waitFor('wave', null, 1500).catch(() => null);
+      await sleep(300);
+      check('onde d\'Excalibur : diffusée à tous', !!wave && wave.len === 100 && wave.id === A.id, JSON.stringify(wave));
+      check('onde d\'Excalibur : tue un ennemi derrière un mur', B.has('kill', (m) => m.v === B.id));
+      A.fire(W.EXCALIBUR, [16, 1.6, 5], [0, 0, 1], { alt: 1 });
+      await sleep(900);
+      check('onde d\'Excalibur : rechargement (30 s) : 2e coup ignoré', A.count('wave') === 1, String(A.count('wave')));
+      await closeAll(A, B);
+    }
+    // --- séries de kills : laser (touche 6), lance-flammes (7), missile nucléaire (8) + gaz (seuils 1, 2, 3 dans ce test) ---
+    {
+      const A = await mk('St-A', [W.AR], 0, 0, 'st'), V1 = await mk('St-V1', [W.KNIFE], 0, 0, 'st'), V2 = await mk('St-V2', [W.KNIFE], 0, 0, 'st'), V3 = await mk('St-V3', [W.KNIFE], 0, 0, 'st');
+      await sleep(450);
+      const shootAt = async (wi, n, gap) => { for (let i = 0; i < n; i++) { A.fire(wi, [-15, 1.6, -25], [0, 0, 1], { seed: i + 1 }); await sleep(gap); } };
+      // 1er kill : fusil d'assaut sur V1
+      A.at(-15, -25, Math.PI, W.AR); V1.at(-15, -21, Math.PI); V2.at(-30, -28, Math.PI); V3.at(-30, -29, Math.PI); await sleep(300);
+      await shootAt(W.AR, 8, 110);
+      const s1 = await A.waitFor('streak', (m) => m.n === 1, 1500).catch(() => null);
+      check('série de 1 : le laser est débloqué (touche 6)', !!s1 && s1.w === W.LASER && s1.loadout.includes(W.LASER), JSON.stringify(s1));
+      check('la série est annoncée à tous', V2.has('streakall', (m) => m.id === A.id && m.n === 1));
+      // laser : étourdit la cible et l'immobilise
+      V1.ws.close();
+      V2.at(-15, -19, Math.PI); await sleep(300);
+      A.at(-15, -25, Math.PI, W.LASER);
+      await sleep(200);
+      A.fire(W.LASER, [-15, 1.6, -25], [0, 0, 1]);
+      const st = await V2.waitFor('stun', null, 1500).catch(() => null);
+      check('laser : la cible touchée est étourdie', !!st && st.ms === 1200, JSON.stringify(st));
+      V2.pos(-10, 0, -19, Math.PI, 0); await sleep(250);
+      const snap = A.lastSnap.p.find((e) => e[0] === V2.id);
+      check('laser : la cible étourdie ne peut plus bouger', !!snap && Math.abs(snap[1] - -15) < 0.5, JSON.stringify(snap));
+      await shootAt(W.LASER, 30, 66);
+      await sleep(200);
+      check('laser : rayon continu, la cible finit tuée', V2.has('kill', (m) => m.v === V2.id));
+      const s2 = await A.waitFor('streak', (m) => m.n === 2, 1500).catch(() => null);
+      check('série de 2 : le lance-flammes est débloqué (touche 7)', !!s2 && s2.w === W.FLAME, JSON.stringify(s2));
+      // lance-flammes : cône devant, jamais derrière
+      await sleep(600);
+      V3.at(-15, -21, Math.PI); await sleep(300);
+      A.pos(-15, 0, -25, Math.PI, W.FLAME);
+      await shootAt(W.FLAME, 16, 56);
+      await sleep(200);
+      check('lance-flammes : tue une cible à 4 m en moins d\'une seconde', V3.has('kill', (m) => m.v === V3.id));
+      const s3 = await A.waitFor('streak', (m) => m.n === 3, 1500).catch(() => null);
+      check('série de 3 : le missile nucléaire est débloqué (touche 8)', !!s3 && s3.w === W.NUKE, JSON.stringify(s3));
+      // un seul chargeur : le laser disparaît quand il est vide (150 tirs au total ; 31 déjà tirés)
+      A.pos(-15, 0, -25, Math.PI, W.LASER);
+      for (let i = 0; i < 125; i++) { A.fire(W.LASER, [-15, 1.6, -25], [0, 0, 1], { seed: i + 1 }); await sleep(62); }
+      const lo = A.log.filter((m) => m.t === 'loadout').at(-1);
+      check('laser : un seul chargeur, l\'arme est retirée quand il est vide', !!lo && !lo.loadout.includes(W.LASER) && lo.loadout.includes(W.FLAME), JSON.stringify(lo));
+      // missile nucléaire
+      await sleep(500);
+      V2.at(-20, -10, 0); V3.at(-10, -10, 0);
+      await sleep(600);
+      A.pos(-15, 0, -25, Math.PI, W.NUKE);
+      A.fire(W.NUKE, [-15, 1.6, -25], [0, 0, 1]);
+      const n = await V2.waitFor('nuke', null, 1500).catch(() => null);
+      check('missile nucléaire : lancement annoncé à tous avec le compte à rebours', !!n && n.id === A.id && n.ms === 4500, JSON.stringify(n));
+      await V2.waitFor('nukeboom', null, 6000).catch(() => null);
+      await sleep(400);
+      check('missile nucléaire : tous les autres meurent', V2.has('kill', (m) => m.v === V2.id && m.w === W.NUKE) && V3.has('kill', (m) => m.v === V3.id && m.w === W.NUKE));
+      check('missile nucléaire : le lanceur survit', !A.has('kill', (m) => m.v === A.id));
+      const g = await V2.waitFor('gas', (m) => !m.off, 1000).catch(() => null);
+      check('gaz toxique annoncé (30 s)', !!g && g.owner === A.id && g.ms === 30000, JSON.stringify(g));
+      await sleep(2500);   // les autres ont réapparu (600 ms) : le gaz les ronge, pas le lanceur
+      const sn = A.lastSnap.p;
+      const hpA = sn.find((e) => e[0] === A.id)?.[6], hpV = sn.find((e) => e[0] === V2.id)?.[6];
+      check('gaz : les autres perdent des PV, le lanceur (masque) non', hpA === 100 && hpV < 95 && hpV > 0, `A=${hpA} V=${hpV}`);
+      await closeAll(A, V2, V3);
     }
     // --- minigun : cadence très élevée ---
     {

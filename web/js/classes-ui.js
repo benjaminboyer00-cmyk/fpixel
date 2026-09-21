@@ -16,11 +16,13 @@ export function mountClassPicker(root, settings, { save, onChange, custom = true
   const desc = el('div', { className: 'cls-desc' });
   const box = el('div', { className: 'cls-custom hidden' });
   const budget = el('div', { className: 'cls-budget' });
-  const checks = WEAPONS.map((w, i) => {
+  const checks = [];
+  WEAPONS.forEach((w, i) => {
+    if (w.streak !== undefined) return; // les armes de série se gagnent en jeu, elles ne s'achètent pas
     const cb = el('input', { type: 'checkbox' });
     cb.dataset.w = String(i);
     box.append(el('label', { className: 'cls-w' }, cb, ` ${w.name} `, el('small', { textContent: `${w.cost} pt${w.cost > 1 ? 's' : ''}` })));
-    return cb;
+    checks.push(cb);
   });
   box.append(budget);
   root.replaceChildren(sel, desc, box);

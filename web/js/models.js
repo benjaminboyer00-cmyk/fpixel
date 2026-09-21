@@ -111,13 +111,39 @@ export function buildGun(id) {
       g.add(box(0.05, 0.12, 0.06, '#2a2d33', 0, -0.13, 0.1));
       muzzle = [0, 0, -0.9];
       break;
-    case 'tesla':
-      g.add(box(0.07, 0.09, 0.5, '#e9eef5', 0, 0, -0.2));
-      for (let i = 0; i < 3; i++) g.add(box(0.1, 0.1, 0.03, '#5ce1ff', 0, 0, -0.35 - i * 0.1));  // bobines
-      g.add(box(0.045, 0.045, 0.1, '#bff3ff', 0, 0, -0.68));                                   // émetteur
+    case 'laser':
+      g.add(box(0.08, 0.1, 0.5, '#1c2b3a', 0, 0, -0.2));
+      g.add(box(0.05, 0.05, 0.4, '#2fd4ff', 0, 0.01, -0.6));      // canon lumineux
+      g.add(box(0.1, 0.1, 0.03, '#8ff0ff', 0, 0.01, -0.45));
+      g.add(box(0.1, 0.1, 0.03, '#8ff0ff', 0, 0.01, -0.62));
+      g.add(box(0.12, 0.05, 0.16, '#0f1822', 0, 0.075, -0.15));   // radiateur
       g.add(box(0.045, 0.12, 0.06, '#2a2d33', 0, -0.11, -0.02));
-      g.add(box(0.06, 0.09, 0.2, '#c8ced6', 0, -0.01, 0.2));
-      muzzle = [0, 0, -0.72];
+      muzzle = [0, 0.01, -0.82];
+      break;
+    case 'carbine':
+      g.add(box(0.035, 0.035, 0.55, '#25282e', 0, 0.025, -0.5));   // long canon
+      g.add(box(0.055, 0.08, 0.4, '#5a3a1e', 0, 0, -0.15));        // fût en bois
+      g.add(box(0.05, 0.12, 0.3, '#5a3a1e', 0, -0.02, 0.25));      // crosse
+      g.add(box(0.02, 0.035, 0.03, '#111318', 0, 0.075, -0.75));   // guidon
+      g.add(box(0.03, 0.03, 0.03, '#111318', 0, 0.075, -0.05));    // hausse
+      g.add(box(0.045, 0.09, 0.05, '#2a2d33', 0, -0.09, 0.03));
+      muzzle = [0, 0.025, -0.78];
+      break;
+    case 'flame':
+      g.add(box(0.07, 0.08, 0.55, '#7a1f12', 0, 0, -0.25));
+      g.add(box(0.045, 0.045, 0.28, '#8c939c', 0, 0.01, -0.68));   // buse
+      g.add(box(0.06, 0.06, 0.05, '#ff7a1f', 0, 0.01, -0.84));     // veilleuse
+      g.add(box(0.13, 0.13, 0.3, '#c9a227', 0, 0.02, 0.2));        // bouteille de gaz
+      g.add(box(0.045, 0.12, 0.06, '#2a2d33', 0, -0.11, -0.05));
+      muzzle = [0, 0.01, -0.88];
+      break;
+    case 'nuke':
+      g.add(box(0.16, 0.16, 0.85, '#3d4a3a', 0, 0.02, -0.25));     // tube
+      g.add(box(0.13, 0.13, 0.22, '#c9c9c9', 0, 0.02, -0.78));     // ogive
+      g.add(box(0.175, 0.175, 0.08, '#ffd400', 0, 0.02, -0.55));   // bande jaune « nucléaire »
+      g.add(box(0.05, 0.05, 0.05, '#111318', 0, 0.02, -0.55));
+      g.add(box(0.05, 0.14, 0.06, '#2a2d33', 0, -0.13, -0.05));
+      muzzle = [0, 0.02, -0.92];
       break;
   }
   g.userData.muzzle = new THREE.Vector3(...muzzle);
@@ -137,7 +163,10 @@ export const VM_POSE = {
   grapple: { p: [0.2, -0.24, -0.6], r: [0, 0, 0] },
   portal: { p: [0.2, -0.24, -0.6], r: [0, 0, 0] },
   minigun: { p: [0.2, -0.28, -0.55], r: [0, 0, 0] },
-  tesla: { p: [0.2, -0.25, -0.6], r: [0, 0, 0] },
+  laser: { p: [0.2, -0.25, -0.6], r: [0, 0, 0] },
+  carbine: { p: [0.2, -0.24, -0.62], r: [0, 0, 0] },
+  flame: { p: [0.21, -0.26, -0.58], r: [0, 0, 0] },
+  nuke: { p: [0.22, -0.28, -0.55], r: [0, 0, 0] },
 };
 
 // Joueur adverse : tête, torse, jambes, bras + arme. Faces vers -Z (comme la caméra à yaw 0).

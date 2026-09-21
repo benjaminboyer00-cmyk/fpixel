@@ -223,3 +223,32 @@ body.touch #ammo { font-size: 22px; }
   .row { margin: 6px 0; }
   #settings .panel { display: block; }
 }
+
+/* ---------- séries de kills, missile nucléaire, gaz ---------- */
+#special { margin-top: 4px; font-size: 11px; color: var(--accent); text-align: right; max-width: 260px; }
+.wslot.streak, .tw.streak { border-color: #ffd400; color: #ffd400; }
+.wslot.streak.sel, .tw.streak.sel { background: rgba(80, 60, 0, .75); }
+#nuke { position: fixed; inset: 0; z-index: 40; pointer-events: none; display: flex; align-items: center; justify-content: center;
+  background: radial-gradient(circle, rgba(140, 0, 0, .12), rgba(50, 0, 0, .72)); animation: nukeBg .5s infinite alternate; }
+#nuke .bar { position: absolute; left: 0; right: 0; height: 14vh; background: #000; transition: transform .7s ease-out; }
+#nuke .bar.top { top: 0; transform: translateY(-100%); }
+#nuke .bar.bottom { bottom: 0; transform: translateY(100%); }
+#nuke.on .bar { transform: none; }
+.nuke-core { text-align: center; text-shadow: 3px 3px 0 #000; }
+#nuke-icon { width: min(28vh, 220px); animation: nukePulse .9s infinite alternate; filter: drop-shadow(0 0 18px #ffd400); }
+#nuke-title { margin-top: 8px; font-size: clamp(20px, 5vh, 40px); font-weight: 800; letter-spacing: 5px; color: #ff4b3a; }
+#nuke-sub { font-size: clamp(12px, 2.4vh, 18px); color: #ffd400; letter-spacing: 2px; }
+#nuke-count { font-size: clamp(40px, 12vh, 110px); font-weight: 800; color: #fff; line-height: 1; }
+@keyframes nukeBg { from { background-color: rgba(120, 0, 0, 0); } to { background-color: rgba(120, 0, 0, .25); } }
+@keyframes nukePulse { from { transform: scale(.92); } to { transform: scale(1.08); } }
+#flash { position: fixed; inset: 0; z-index: 45; background: #fff; opacity: 0; pointer-events: none; }
+#gas-overlay { position: fixed; inset: 0; z-index: 30; pointer-events: none;
+  background: radial-gradient(circle, rgba(120, 170, 30, .1), rgba(80, 130, 20, .5)); animation: gasPulse 2s infinite alternate; }
+@keyframes gasPulse { from { opacity: .7; } to { opacity: 1; } }
+#mask { position: fixed; inset: 0; z-index: 31; pointer-events: none; background: #05070a;
+  -webkit-mask-image: radial-gradient(ellipse 24% 34% at 29% 50%, transparent 94%, #000 100%), radial-gradient(ellipse 24% 34% at 71% 50%, transparent 94%, #000 100%);
+  -webkit-mask-composite: source-in; mask-image: radial-gradient(ellipse 24% 34% at 29% 50%, transparent 94%, #000 100%), radial-gradient(ellipse 24% 34% at 71% 50%, transparent 94%, #000 100%);
+  mask-composite: intersect; }
+#gas-text { position: fixed; top: 64px; left: 50%; transform: translateX(-50%); z-index: 32; padding: 4px 12px; font-weight: 700; letter-spacing: 2px;
+  color: #c9f56b; background: rgba(20, 40, 0, .6); border: 2px solid #7aa82a; pointer-events: none; }
+#bottom-left, #bottom-right, #weapons, #topbar, #killfeed, #hint { z-index: 33; } /* au-dessus du masque à gaz */

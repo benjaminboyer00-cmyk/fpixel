@@ -26,11 +26,34 @@
     <div id="banner"></div>
     <div id="death" class="hidden"><div id="death-title"></div><div id="death-sub"></div></div>
     <div id="bottom-left"><div id="hp-bar"><div id="hp-fill"></div></div><div id="hp-text">100</div></div>
-    <div id="bottom-right"><div id="weapon-name"></div><div id="ammo"></div></div>
+    <div id="bottom-right"><div id="weapon-name"></div><div id="ammo"></div><div id="special"></div></div>
     <div id="weapons"></div>
     <div id="hint"></div>
     <div id="netinfo"></div>
     <div id="scoreboard" class="hidden"></div>
+
+    <!-- Missile nucléaire : mini-cinématique -->
+    <div id="nuke" class="hidden">
+      <div class="bar top"></div><div class="bar bottom"></div>
+      <div class="nuke-core">
+        <svg id="nuke-icon" viewBox="-70 -70 140 140" aria-hidden="true">
+          <circle r="66" fill="#000" stroke="#ffd400" stroke-width="4"/>
+          <g fill="#ffd400">
+            <path d="M0,0 L-30,-52 A60,60 0 0 1 30,-52 Z"/>
+            <path d="M0,0 L-30,-52 A60,60 0 0 1 30,-52 Z" transform="rotate(120)"/>
+            <path d="M0,0 L-30,-52 A60,60 0 0 1 30,-52 Z" transform="rotate(240)"/>
+          </g>
+          <circle r="14" fill="#000"/><circle r="9" fill="#ffd400"/>
+        </svg>
+        <div id="nuke-title">MISSILE NUCLÉAIRE</div>
+        <div id="nuke-sub"></div>
+        <div id="nuke-count"></div>
+      </div>
+    </div>
+    <div id="flash"></div>
+    <div id="gas-overlay" class="hidden"></div>
+    <div id="mask" class="hidden"></div>
+    <div id="gas-text" class="hidden"></div>
   </div>
 
   <!-- ====================== Contrôles tactiles ====================== -->
@@ -109,7 +132,7 @@
 
       <details class="help">
         <summary>Contrôles</summary>
-        <p class="desktop-only"><b>ZQSD / WASD</b> bouger · <b>Souris</b> viser · <b>Clic gauche</b> (ou <b>F</b> / <b>Entrée</b>) tirer · <b>Clic droit</b> zoom sniper · <b>Espace</b> sauter · <b>R</b> recharger · <b>1-9 / molette</b> armes · <b>Clic droit</b> ou <b>E</b> tir secondaire (portail orange) · <b>Tab</b> scores · <b>M</b> mini-carte · <b>Échap</b> pause<br>Portable sans souris : <b>flèches</b> pour viser, <b>F</b> pour tirer, et le <b>tir automatique</b> (réglages) tire tout seul quand un ennemi est dans le viseur.</p>
+        <p class="desktop-only"><b>ZQSD / WASD</b> bouger · <b>Souris</b> viser · <b>Clic gauche</b> (ou <b>F</b> / <b>Entrée</b>) tirer · <b>Clic droit</b> zoom sniper · <b>Espace</b> sauter · <b>R</b> recharger · <b>1-9 / molette</b> armes · <b>Clic droit</b> ou <b>E</b> tir secondaire (portail orange, onde d'Excalibur) · <b>6 / 7 / 8</b> armes de série (5 / 10 / 15 kills d'affilée) · <b>Tab</b> scores · <b>M</b> mini-carte · <b>Échap</b> pause<br>Portable sans souris : <b>flèches</b> pour viser, <b>F</b> pour tirer, et le <b>tir automatique</b> (réglages) tire tout seul quand un ennemi est dans le viseur.</p>
         <p class="touch-only"><b>Joystick gauche</b> bouger · <b>Glisser à droite</b> viser · <b>FEU</b> tirer (glisse dessus pour viser en tirant) · <b>ZOOM</b> pour le sniper</p>
       </details>
     </div>

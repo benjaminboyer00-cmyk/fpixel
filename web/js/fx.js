@@ -3,6 +3,7 @@ import * as THREE from 'three';
 
 const tracerGeo = new THREE.BoxGeometry(0.035, 0.035, 1);
 const partGeo = new THREE.BoxGeometry(0.1, 0.1, 0.1);
+const unitGeo = new THREE.BoxGeometry(1, 1, 1); // ondes et boules de feu : mises à l'échelle en mètres
 
 export class Fx {
   constructor(scene) {
@@ -25,11 +26,19 @@ export class Fx {
     }
     this.flashes = []; // boules de feu des explosions
     for (let i = 0; i < 6; i++) {
-      const m = new THREE.Mesh(partGeo, new THREE.MeshBasicMaterial({ color: 0xffb84a, transparent: true, fog: false }));
+      const m = new THREE.Mesh(unitGeo, new THREE.MeshBasicMaterial({ color: 0xffb84a, transparent: true, fog: false }));
       m.visible = false; m.userData = { life: 0, max: 0.35, r: 1 };
       scene.add(m);
       this.flashes.push(m);
     }
+    this.waves = [];  // ondes d'Excalibur
+    for (let i = 0; i < 3; i++) {
+      const m = new THREE.Mesh(unitGeo, new THREE.MeshBasicMaterial({ color: 0xfff3b0, transparent: true, fog: false, depthTest: false, side: 2 /* DoubleSide (absent du build three.js allégé) */ }));
+      m.visible = false; m.renderOrder = 10; m.frustumCulled = false; m.userData = { life: 0, max: 0.7 };
+      scene.add(m);
+      this.waves.push(m);
+    }
+    this.wi = 0;
     this.projs = new Map();  // roquettes / grenades en vol
     this.portals = new Map(); // "propriétaire:i" -> mesh
     this.fi = 0;
@@ -38,20 +47,30 @@ export class Fx {
     this._v = new THREE.Vector3();
   }
 
-  // Éclair : ligne brisée entre les points (chaque segment est découpé et décalé au hasard)
-  bolt(points, color = 0x8ee8ff) {
-    for (let k = 0; k + 1 < points.length; k++) {
-      const a = points[k], b = points[k + 1];
-      let px = a[0], py = a[1], pz = a[2];
-      const n = 5;
-      for (let j = 1; j <= n; j++) {
-        const f = j / n, jit = j === n ? 0 : 0.25;
-        const x = a[0] + (b[0] - a[0]) * f + (Math.random() - 0.5) * jit;
-        const y = a[1] + (b[1] - a[1]) * f + (Math.random() - 0.5) * jit;
-        const z = a[2] + (b[2] - a[2]) * f + (Math.random() - 0.5) * jit;
-        this.tracer(px, py, pz, x, y, z, color, 0.16);
-        px = x; py = y; pz = z;
-      }
+  // Onde d'Excalibur : grand plan lumineux qui traverse tout (visible à travers les murs), s'estompe en 0,7 s
+  wave(o, d, len) {
+    const m = this.waves[this.wi++ % this.waves.length];
+    m.position.set(o[0] + d[0] * len / 2, o[1] + d[1] * len / 2, o[2] + d[2] * len / 2);
+    m.lookAt(o[0] + d[0] * len, o[1] + d[1] * len, o[2] + d[2] * len);
+    m.scale.set(3.4, 2.6, len);
+    m.userData.life = m.userData.max = 0.7;
+    m.visible = true;
+  }
+
+  // Jet de flammes : particules projetées dans la direction du tir
+  jet(x, y, z, dx, dy, dz) {
+    const cols = ['#ff9a2e', '#ffd45a', '#ff5a1f', '#ffe9a0'];
+    for (let i = 0; i < 5; i++) {
+      const m = this.parts[this.pi++ % this.parts.length];
+      const v = 7 + Math.random() * 6;
+      m.position.set(x, y, z);
+      m.material.color.set(cols[(Math.random() * cols.length) | 0]);
+      m.userData.vx = dx * v + (Math.random() - 0.5) * 1.6;
+      m.userData.vy = dy * v + (Math.random() - 0.3) * 1.6 + 1.2;
+      m.userData.vz = dz * v + (Math.random() - 0.5) * 1.6;
+      m.userData.life = 0.35 + Math.random() * 0.25;
+      m.scale.setScalar(1.6);
+      m.visible = true;
     }
   }
 
@@ -146,9 +165,17 @@ export class Fx {
       u.life -= dt;
       if (u.life <= 0) { m.visible = false; continue; }
       const t = 1 - u.life / u.max;
-      m.scale.setScalar(u.r * (0.5 + 1.3 * t));
+      m.scale.setScalar(u.r * (0.8 + 1.2 * t));
       m.material.opacity = 0.9 * (1 - t);
       m.rotation.y += dt * 4;
+    }
+    for (const m of this.waves) {
+      if (!m.visible) continue;
+      m.userData.life -= dt;
+      if (m.userData.life <= 0) { m.visible = false; continue; }
+      const t = 1 - m.userData.life / m.userData.max;
+      m.material.opacity = 0.5 * (1 - t);
+      m.scale.x = 3.4 * (1 - t * 0.7);
     }
     for (const p of this.projs.values()) {
       p.vy -= p.g * dt;
@@ -176,6 +203,7 @@ export class Fx {
     for (const m of this.tracers) m.visible = false;
     for (const m of this.parts) m.visible = false;
     for (const m of this.flashes) m.visible = false;
+    for (const m of this.waves) m.visible = false;
     for (const id of [...this.projs.keys()]) this.removeProj(id);
     for (const k of [...this.portals.keys()]) this.removePortal(k);
   }

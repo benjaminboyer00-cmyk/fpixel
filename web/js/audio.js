@@ -59,7 +59,14 @@ class Sfx {
     o.start(t); o.stop(t + dur + 0.02);
   }
 
-  // name: ar shotgun sniper revolver knife rocket grenade excalibur grapple portal minigun tesla boom | hit headshot kill hurt reload empty spawn
+  // Sirène du missile nucléaire : alarme qui monte et descend pendant ms millisecondes
+  siren(ms) {
+    if (!this.ctx || this.volume <= 0) return;
+    const out = this._out(0.7, 0);
+    for (let i = 0; i * 0.45 * 1000 < ms; i++) this._tone({ dur: 0.42, freq: 520, freqEnd: 900, type: 'sawtooth', gain: 0.22, out, delay: i * 0.45 });
+  }
+
+  // name: ar shotgun sniper revolver knife rocket grenade excalibur grapple portal minigun laser carbine flame nuke wave stun streak nukeboom boom | hit headshot kill hurt reload empty spawn
   // opts: gain (0..1, atténuation distance), pan (-1..1)
   play(name, { gain = 1, pan = 0 } = {}) {
     if (!this.ctx || this.volume <= 0 || gain <= 0.01) return;
@@ -112,9 +119,37 @@ class Sfx {
         this._burst({ dur: 0.05, type: 'bandpass', freq: 1800, freqEnd: 800, q: 0.8, gain: 0.55, out });
         this._tone({ dur: 0.04, freq: 120, freqEnd: 60, type: 'square', gain: 0.2, out });
         break;
-      case 'tesla':
-        this._burst({ dur: 0.25, type: 'highpass', freq: 1500, freqEnd: 6000, q: 0.8, gain: 0.8, out });
-        this._tone({ dur: 0.22, freq: 1800, freqEnd: 250, type: 'sawtooth', gain: 0.3, out });
+      case 'laser':
+        this._tone({ dur: 0.07, freq: 1400, freqEnd: 900, type: 'sawtooth', gain: 0.22, out });
+        this._tone({ dur: 0.06, freq: 2100, freqEnd: 1500, type: 'sine', gain: 0.15, out });
+        break;
+      case 'carbine':
+        this._burst({ dur: 0.5, type: 'lowpass', freq: 4000, freqEnd: 250, gain: 1.4, out });
+        this._tone({ dur: 0.35, freq: 100, freqEnd: 30, type: 'sawtooth', gain: 0.9, out });
+        break;
+      case 'flame':
+        this._burst({ dur: 0.09, type: 'bandpass', freq: 700, freqEnd: 350, q: 0.6, gain: 0.8, out });
+        break;
+      case 'nuke':
+        this._burst({ dur: 0.9, type: 'lowpass', freq: 2400, freqEnd: 120, gain: 1.2, out });
+        this._tone({ dur: 0.8, freq: 90, freqEnd: 400, type: 'sawtooth', gain: 0.5, out });
+        break;
+      case 'wave':
+        this._burst({ dur: 0.7, type: 'highpass', freq: 400, freqEnd: 6000, q: 0.5, gain: 1.0, out });
+        this._tone({ dur: 0.9, freq: 180, freqEnd: 40, type: 'sawtooth', gain: 0.9, out });
+        this._tone({ dur: 0.8, freq: 1568, freqEnd: 800, type: 'triangle', gain: 0.25, out, delay: 0.05 });
+        break;
+      case 'stun':
+        this._tone({ dur: 0.35, freq: 90, freqEnd: 60, type: 'square', gain: 0.35, out });
+        this._burst({ dur: 0.3, type: 'bandpass', freq: 1200, q: 2, gain: 0.5, out });
+        break;
+      case 'streak':
+        [392, 523, 659, 784].forEach((f, i) => this._tone({ dur: 0.12, freq: f, type: 'square', gain: 0.22, out, delay: i * 0.08 }));
+        break;
+      case 'nukeboom':
+        this._burst({ dur: 3.0, type: 'lowpass', freq: 1400, freqEnd: 40, gain: 2.2, out });
+        this._tone({ dur: 2.5, freq: 60, freqEnd: 18, type: 'sawtooth', gain: 1.2, out });
+        this._tone({ dur: 1.5, freq: 40, freqEnd: 15, type: 'sine', gain: 1.0, out });
         break;
       case 'boom':
         this._burst({ dur: 0.9, type: 'lowpass', freq: 1600, freqEnd: 90, gain: 1.7, out });

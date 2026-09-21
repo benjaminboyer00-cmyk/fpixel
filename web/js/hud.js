@@ -42,11 +42,12 @@ export class Hud {
     tbar.replaceChildren();
     list.forEach((wi, k) => {
       const w = WEAPONS[wi];
-      const s = el('div', { className: 'wslot' }, el('b', { textContent: String(k + 1) }), w.name.replace('Fusil ', 'F. ').replace('Lance-', 'L. '));
+      const series = w.streak !== undefined;            // arme de série : touche 6, 7 ou 8
+      const s = el('div', { className: series ? 'wslot streak' : 'wslot' }, el('b', { textContent: String(series ? 6 + w.streak : k + 1) }), w.name.replace('Fusil ', 'F. ').replace('Lance-', 'L. '));
       bar.append(s);
       this.slots.push(s);
-      const t = el('button', { className: 'tw', textContent: String(k + 1) });
-      t.dataset.w = String(k);
+      const t = el('button', { className: series ? 'tw streak' : 'tw', textContent: String(series ? 6 + w.streak : k + 1) });
+      t.dataset.w = String(series ? 5 + w.streak : k);
       tbar.append(t);
       this.tslots.push(t);
     });
@@ -144,6 +145,37 @@ export class Hud {
     e.classList.add('on');
     clearTimeout(this.hintT);
     this.hintT = setTimeout(() => e.classList.remove('on'), ms);
+  }
+
+  // Petite ligne d'aide sous l'arme (tir secondaire, recharge de l'onde...)
+  setSpecial(text) { this._set('special', 'special', text, (e, v) => { e.textContent = v; }); }
+
+  // Missile nucléaire : cinématique (bandes noires, symbole, compte à rebours)
+  nuke(show, who = '') {
+    const e = $('nuke');
+    if (!show) { e.classList.remove('on'); e.classList.add('hidden'); return; }
+    $('nuke-sub').textContent = who;
+    e.classList.remove('hidden');
+    void e.offsetWidth;
+    e.classList.add('on');
+  }
+  nukeCount(sec) { this._set('nuke-count', 'nc', Math.ceil(sec), (e, v) => { e.textContent = v > 0 ? v : ''; }); }
+
+  // Flash blanc de l'explosion
+  flash() {
+    const f = $('flash');
+    f.style.transition = 'none'; f.style.opacity = '1';
+    void f.offsetWidth;
+    f.style.transition = 'opacity 3s ease-out'; f.style.opacity = '0';
+  }
+
+  // Gaz toxique : kind = 'toxic' (les autres), 'mask' (le lanceur, masque à gaz), null = fini
+  gas(kind, left = 0) {
+    $('gas-overlay').classList.toggle('hidden', kind !== 'toxic');
+    $('mask').classList.toggle('hidden', kind !== 'mask');
+    const t = $('gas-text');
+    t.classList.toggle('hidden', !kind);
+    if (kind) this._set('gas-text', 'gas', `${kind}:${Math.ceil(left)}`, (e) => { e.textContent = kind === 'mask' ? `☣ MASQUE À GAZ · ${Math.ceil(left)} s` : `☣ GAZ TOXIQUE · ${Math.ceil(left)} s`; });
   }
 
   netinfo(text) { this._set('netinfo', 'net', text, (e, v) => { e.textContent = v; }); }

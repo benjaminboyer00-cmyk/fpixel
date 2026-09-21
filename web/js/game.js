@@ -1,7 +1,7 @@
 // Boucle de jeu : joueur local (prédit côté client), autres joueurs (interpolés), tirs, effets, HUD.
 import * as THREE from 'three';
 import {
-  TICK_MS, INTERP_MS, EYE_HEIGHT, MAX_HP, RESPAWN_MS, WALK_SPEED, WEAPONS, GUN_ORDER, KNIFE, resolveClass,
+  TICK_MS, INTERP_MS, EYE_HEIGHT, MAX_HP, RESPAWN_MS, WALK_SPEED, JUMP_SPEED, WEAPONS, GUN_ORDER, KNIFE, resolveClass, STREAK_WEAPONS,
 } from '../shared/config.js';
 import { mapById } from '../shared/map.js';
 import { mulberry32, applySpread, lookDir, clamp, angleLerp, rayAABB } from '../shared/util.js';
@@ -49,6 +49,8 @@ export class Game {
     this.players = new Map();
     this.portals = new Map();   // id du propriétaire -> [portail bleu, portail orange]
     this.shake = 0;
+    this.nukeAt = 0;            // heure d'impact du missile nucléaire en vol
+    this.gas = null;            // gaz toxique : { owner, until }
     this.running = false;
     this.paused = false;
     this.me = null;
@@ -121,7 +123,7 @@ export class Game {
     const loadout = this.gun ? [GUN_ORDER[level], KNIFE] : resolveClass(s0.cls, s0.custom).weapons.slice();
     this.me = {
       x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, onGround: true, yaw: 0, pitch: 0,
-      level, loadout, maxHp: MAX_HP, speedMul: 1, pull: null, portalUntil: 0,
+      level, loadout, maxHp: MAX_HP, speedMul: 1, pull: null, portalUntil: 0, stunUntil: 0, altUntil: {}, jumpPrev: false,
       hp: MAX_HP, alive: false, spawned: false, weapon: loadout[0], ammo: WEAPONS.map((w) => w.mag),
       reloadUntil: 0, nextFire: 0, switchUntil: 0, scoped: false, scopeToggle: false,
       respawnAt: 0, killer: null, deadT: 0, prot: 0, lastSend: 0,
@@ -129,6 +131,8 @@ export class Game {
     for (const p of welcome.players) this._addPlayer(p);
     this.portals.clear();
     for (const q of welcome.portals || []) this._setPortal(q);
+    this.nukeAt = 0; this.gas = null;
+    if (welcome.gas) this._setGas({ owner: welcome.gas.owner, ms: welcome.gas.ms });
     this.viewmodel.setWeapon(this.me.weapon);
     this.hud.setLoadout(loadout);
     this.fov = 0;
@@ -156,6 +160,9 @@ export class Game {
     this.players.clear();
     this.portals.clear();
     this.fx.clear();
+    this.nukeAt = 0; this.gas = null;
+    this.hud.nuke(false); this.hud.gas(null);
+    this._gasLook(false);
     this.minimap.clear();
     this.input.enabled = false;
     this.input.reset();
@@ -278,8 +285,52 @@ export class Game {
     });
     n.on('pull', (m) => { // grappin : on est attiré vers un point
       const me = this.me;
-      if (me?.alive) me.pull = { x: m.x, y: m.y, z: m.z, sp: m.sp, until: performance.now() + m.ms };
+      if (me?.alive) me.pull = { x: m.x, y: m.y, z: m.z, sp: m.sp, until: performance.now() + m.ms, hook: m.hook };
     });
+    n.on('streak', (m) => { // série de kills : nouvelle arme (touche 6, 7 ou 8)
+      const me = this.me, w = WEAPONS[m.w];
+      me.loadout = m.loadout.slice();
+      me.ammo[m.w] = w.mag;
+      this.hud.setLoadout(me.loadout);
+      this.hud.hint(`SÉRIE DE ${m.n} ! Touche ${6 + w.streak} : ${w.name} (un seul chargeur)`, 6000);
+      sfx.play('streak');
+    });
+    n.on('streakall', (m) => { if (m.id !== this.myId) this.hud.sysMessage(`${this._name(m.id)} est à ${m.n} kills d'affilée !`); });
+    n.on('loadout', (m) => { // arme de série vide : retirée
+      const me = this.me;
+      me.loadout = m.loadout.slice();
+      this.hud.setLoadout(me.loadout);
+      if (!me.loadout.includes(me.weapon)) this._switchTo(me.loadout[0], performance.now());
+    });
+    n.on('stun', (m) => {
+      const me = this.me;
+      me.stunUntil = performance.now() + m.ms;
+      me.scoped = false; me.scopeToggle = false;
+      this.hud.hint('ÉTOURDI !', m.ms);
+      this.shake = Math.max(this.shake, 0.04);
+      sfx.play('stun');
+    });
+    n.on('wave', (m) => { // onde d'Excalibur
+      this.fx.wave(m.o, m.d, m.len);
+      const cam = this.camera.position;
+      const dist = Math.hypot(m.o[0] - cam.x, m.o[2] - cam.z);
+      sfx.play('wave', { gain: Math.pow(clamp(1 - dist / 90, 0.15, 1), 1.2) });
+      this.shake = Math.max(this.shake, 0.05);
+    });
+    n.on('nuke', (m) => {
+      this.nukeAt = performance.now() + m.ms;
+      this.hud.nuke(true, m.id === this.myId ? 'Lancé par toi' : `Lancé par ${this._name(m.id)}`);
+      sfx.siren(m.ms);
+    });
+    n.on('nukeOff', () => { this.nukeAt = 0; this.hud.nuke(false); });
+    n.on('nukeboom', () => {
+      this.nukeAt = 0;
+      this.hud.nuke(false);
+      this.hud.flash();
+      sfx.play('nukeboom');
+      this.shake = 0.3;
+    });
+    n.on('gas', (m) => this._setGas(m));
     n.on('classok', (m) => this.hud.hint(`Classe « ${m.name} » à ta prochaine réapparition`, 4000));
     n.on('state', (m) => {
       this.state = m.s;
@@ -355,13 +406,14 @@ export class Game {
     // léger décalage vers la main droite du tireur pour que la traînée parte de l'arme
     const yaw = p?.model.group.rotation.y ?? 0;
     const sx = ox + Math.cos(yaw) * 0.25, sz = oz - Math.sin(yaw) * 0.25, sy = oy - 0.3;
-    if (m.chain) {
-      this.fx.bolt([[sx, sy, sz], ...m.e]);
+    if (w.kind === 'flame') {
+      const e = m.e[0], l = Math.hypot(e[0] - ox, e[1] - oy, e[2] - oz) || 1;
+      this.fx.jet(sx, sy, sz, (e[0] - ox) / l, (e[1] - oy) / l, (e[2] - oz) / l);
     } else if (w.kind === 'grapple') {
       this.fx.tracer(sx, sy, sz, m.e[0][0], m.e[0][1], m.e[0][2], 0xe58a2b, 0.25);
     } else {
       for (const e of m.e) {
-        this.fx.tracer(sx, sy, sz, e[0], e[1], e[2], w.kind === 'sweep' ? 0xdfe8f5 : 0xffe9a0);
+        this.fx.tracer(sx, sy, sz, e[0], e[1], e[2], w.kind === 'sweep' ? 0xdfe8f5 : w.kind === 'beam' ? 0x66ffff : 0xffe9a0);
         this.fx.burst(e[0], e[1], e[2], '#cfcfcf', 2, 2, 0.3);
       }
     }
@@ -424,7 +476,11 @@ export class Game {
     if (me.alive && inp.active) {
       // --- changement d'arme ---
       const slot = inp.takeWeapon();
-      let want = slot !== null ? me.loadout[slot] : undefined;
+      let want;
+      if (slot !== null) {
+        if (slot >= 5) { const sw = STREAK_WEAPONS[slot - 5]; want = me.loadout.includes(sw) ? sw : undefined; }   // touches 6-8 : armes de série
+        else { const c = me.loadout[slot]; want = WEAPONS[c]?.streak === undefined ? c : undefined; }
+      }
       const cyc = inp.takeCycle();
       if (cyc) want = this._cycleWeapon(Math.sign(cyc));
       if (want !== undefined && want !== me.weapon && WEAPONS[want]) this._switchTo(want, now);
@@ -447,6 +503,11 @@ export class Game {
         // pistolet portail : tir = portail bleu, tir secondaire (clic droit / E / ZOOM) = portail orange
         const alt = inp.takeAlt();
         if (firing || alt) this._tryFire(now, alt);
+      } else if (w.alt) {
+        // Excalibur : tir = coup d'épée, tir secondaire = onde qui traverse la carte (très longue recharge)
+        const alt = inp.takeAlt();
+        if (alt) this._tryFire(now, true);
+        else if (firing) this._tryFire(now);
       } else {
         inp.takeAlt();
         if (firing) this._tryFire(now);
@@ -470,6 +531,11 @@ export class Game {
       }
     }
     let speed = WALK_SPEED * w.speed * (me.scoped ? 0.5 : 1) * me.speedMul;
+    const stunned = now < me.stunUntil;
+    if (stunned) { wx = wz = 0; me.vx = me.vz = 0; me.pull = null; }
+    const jumpNow = active && inp.jumpHeld && !stunned;
+    if (me.pull && jumpNow && !me.jumpPrev) { me.pull = null; me.vy = Math.max(me.vy, JUMP_SPEED); }   // saut = on se décroche en gardant son élan
+    me.jumpPrev = jumpNow;
     if (me.pull) { // grappin : on est tiré vers le point d'accroche
       const dx = me.pull.x - me.x, dy = me.pull.y - me.y, dz = me.pull.z - me.z, l = Math.hypot(dx, dy, dz);
       if (!me.alive || now >= me.pull.until || l < 1.2) me.pull = null;
@@ -478,10 +544,14 @@ export class Game {
         me.vx = dx * k; me.vz = dz * k;
         if (dy > 0.2) me.vy = Math.max(me.vy, dy * k);
         wx = dx / l; wz = dz / l; speed = me.pull.sp;
+        if (me.pull.hook) { // corde tendue jusqu'au point d'accroche
+          const mz = this.camera.localToWorld(this._v.set(0.2, -0.18, -0.7));
+          this.fx.tracer(mz.x, mz.y, mz.z, me.pull.hook[0], me.pull.hook[1], me.pull.hook[2], 0xe58a2b, 0.06);
+        }
       }
     }
     if (me.spawned) {
-      stepPlayer(me, dt, wx, wz, speed, active && inp.jumpHeld && !me.pull, this.map);
+      stepPlayer(me, dt, wx, wz, speed, jumpNow && !me.pull, this.map);
       if (me.y < -10) { me.y = 3; me.vy = 0; }
       this._checkPortals(now, wx, wz);
     }
@@ -553,6 +623,20 @@ export class Game {
     }
   }
 
+  // ---- gaz toxique (après le missile nucléaire) : brouillard vert pour tous, sauf le lanceur qui porte un masque ----
+  _setGas(m) {
+    if (m.off) { this.gas = null; this.hud.gas(null); this._gasLook(false); return; }
+    this.gas = { owner: m.owner, until: performance.now() + m.ms };
+    this._gasLook(m.owner !== this.myId);
+  }
+
+  _gasLook(toxic) {
+    const sc = this.scene, map = this.map;
+    if (!sc.fog || !map) return;
+    if (toxic) { sc.background.set('#6f8f2a'); sc.fog.color.set('#6f8f2a'); sc.fog.near = 1; sc.fog.far = 26; }
+    else { sc.background.set(map.sky); sc.fog.color.set(map.sky); sc.fog.near = map.fog[0]; sc.fog.far = map.fog[1]; }
+  }
+
   _cycleWeapon(dir) {
     const me = this.me, n = me.loadout.length;
     const i = me.loadout.indexOf(me.weapon);
@@ -585,7 +669,7 @@ export class Game {
 
   _startReload(now) {
     const me = this.me, w = WEAPONS[me.weapon];
-    if (!w.mag || me.reloadUntil || me.ammo[me.weapon] >= w.mag) return;
+    if (!w.mag || w.noReload || me.reloadUntil || me.ammo[me.weapon] >= w.mag) return;
     me.reloadUntil = now + w.reload;
     me.scoped = false; me.scopeToggle = false;
     sfx.play('reload');
@@ -593,7 +677,12 @@ export class Game {
 
   _tryFire(now, alt = false) {
     const me = this.me, w = WEAPONS[me.weapon];
-    if (this.state === 'ended' || now < me.nextFire || now < me.switchUntil || me.reloadUntil) return;
+    if (this.state === 'ended' || now < me.nextFire || now < me.switchUntil || me.reloadUntil || now < me.stunUntil) return;
+    if (alt && w.alt) { // coup ultime : recharge très longue
+      const left = (me.altUntil[me.weapon] || 0) - now;
+      if (left > 0) { this.hud.hint(`${w.alt.name} : recharge ${Math.ceil(left / 1000)} s`, 1500); return; }
+      me.altUntil[me.weapon] = now + w.alt.cooldown;
+    }
     if (w.mag && me.ammo[me.weapon] <= 0) {
       sfx.play('empty');
       me.nextFire = now + 250;
@@ -617,9 +706,14 @@ export class Game {
 
     // Effets locaux immédiats (même graine que le serveur => mêmes plombs)
     this.viewmodel.fire();
-    sfx.play(w.kind === 'portal' && alt ? 'portal2' : w.id);
+    sfx.play(w.kind === 'portal' && alt ? 'portal2' : alt && w.alt ? 'wave' : w.id);
+    if (alt && w.alt) return; // l'onde est dessinée à la réception du message du serveur
     if (w.kind === 'portal') return;
-    if (w.kind === 'grapple' || w.kind === 'chain') {
+    if (w.kind === 'flame') {
+      const mz = this.camera.localToWorld(this._v.set(0.2, -0.18, -0.7));
+      this.fx.jet(mz.x, mz.y, mz.z, dx, dy, dz);
+    }
+    if (w.kind === 'grapple' || w.kind === 'beam') {
       // pas de message "shot" pour le tireur : on dessine le trait jusqu'au premier mur (les ennemis touchés sont gérés par le serveur)
       let reach = w.range;
       for (const b of this.map.boxes) {
@@ -628,7 +722,7 @@ export class Game {
       }
       const mz = this.camera.localToWorld(this._v.set(0.2, -0.18, -0.7));
       const end = [ex + dx * reach, ey + dy * reach, ez + dz * reach];
-      if (w.kind === 'chain') this.fx.bolt([[mz.x, mz.y, mz.z], end]);
+      if (w.kind === 'beam') this.fx.tracer(mz.x, mz.y, mz.z, end[0], end[1], end[2], 0x66ffff, 0.07);
       else this.fx.tracer(mz.x, mz.y, mz.z, end[0], end[1], end[2], 0xe58a2b, 0.25);
     }
     if (!w.melee) {
@@ -732,6 +826,17 @@ export class Game {
     const me = this.me;
     this.hud.setHp(me.alive ? me.hp : 0, me.maxHp);
     this.hud.setWeapon(me.weapon, me.ammo[me.weapon], !!me.reloadUntil);
+    const cw = WEAPONS[me.weapon];
+    let special = '';
+    if (cw.alt) {
+      const left = (me.altUntil[me.weapon] || 0) - now;
+      special = left > 0 ? `${cw.alt.name} : recharge ${Math.ceil(left / 1000)} s` : `${cw.alt.name} : PRÊT (clic droit / E)`;
+    } else if (cw.kind === 'portal') special = 'Clic : portail bleu · clic droit / E : portail orange';
+    else if (cw.kind === 'grapple') special = 'Saut pendant le grappin : on se décroche en gardant l\'élan';
+    else if (cw.streak !== undefined) special = `Arme de série · un seul chargeur${cw.kind === 'nuke' ? ' · 1 missile' : ''}`;
+    this.hud.setSpecial(special);
+    if (this.nukeAt) this.hud.nukeCount(Math.max(0, (this.nukeAt - now) / 1000));
+    if (this.gas) this.hud.gas(this.gas.owner === this.myId ? 'mask' : 'toxic', Math.max(0, (this.gas.until - now) / 1000));
 
     if (!me.alive && me.spawned && this.state !== 'ended') {
       const left = Math.max(0, Math.ceil((me.respawnAt - now) / 1000));

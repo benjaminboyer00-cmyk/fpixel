@@ -68,7 +68,7 @@ export const WEAPONS = [
     mag: 0, reload: 0, falloff: null, speed: 1.15, recoil: 0,
   },
   // ---- armes spéciales (index 5+) ----
-  // kind : 'rocket' (projectile explosif), 'sweep' (épée), 'grapple' (grappin), 'portal', 'chain' (foudre)
+  // kind : 'rocket' (projectile explosif), 'sweep' (épée), 'grapple' (grappin), 'portal', 'beam' (laser), 'flame', 'nuke'
   {
     id: 'rocket', name: 'Lance-roquettes', kind: 'rocket', cost: 4, auto: false, interval: 1100,
     dmg: 110, headMul: 1, pellets: 1, spread: 0.004, mag: 3, reload: 2600, falloff: null, speed: 0.9, recoil: 2.0,
@@ -77,10 +77,12 @@ export const WEAPONS = [
   {
     id: 'excalibur', name: 'Excalibur', kind: 'sweep', melee: true, cost: 4, auto: false, interval: 650,
     dmg: 65, headMul: 1, pellets: 1, spread: 0, range: 3.4, cone: 0.62, heal: 30, mag: 0, reload: 0, falloff: null, speed: 1.1, recoil: 0,
+    // tir secondaire (clic droit / E) : une onde qui traverse les murs de toute la carte, mais très longue à recharger
+    alt: { name: "Onde d'Excalibur", cooldown: 30000, dmg: 200, range: 100, width: 1.7 },
   },
   {
-    id: 'grapple', name: 'Grappin', kind: 'grapple', cost: 2, auto: false, interval: 3500,
-    dmg: 8, headMul: 1, pellets: 1, spread: 0, range: 40, pull: { speed: 21, ms: 700 }, mag: 0, reload: 0, falloff: null, speed: 1.0, recoil: 0,
+    id: 'grapple', name: 'Grappin', kind: 'grapple', cost: 2, auto: false, interval: 900,
+    dmg: 8, headMul: 1, pellets: 1, spread: 0, range: 60, pull: { speed: 28, ms: 1300 }, mag: 0, reload: 0, falloff: null, speed: 1.0, recoil: 0,
   },
   {
     id: 'portal', name: 'Pistolet portail', kind: 'portal', cost: 3, auto: false, interval: 400,
@@ -95,14 +97,34 @@ export const WEAPONS = [
     dmg: 90, headMul: 1, pellets: 1, spread: 0.01, mag: 4, reload: 2400, falloff: null, speed: 0.95, recoil: 1.5,
     proj: { speed: 22, gravity: 14, life: 3, radius: 3.8, minMul: 0.25, self: 0.5, knock: 11 },
   },
+  // ---- armes de série (index 11, 13, 14) : gagnées en enchaînant les kills sans mourir, un seul chargeur, pas de recharge ----
+  // streak = numéro de l'arme dans STREAK_WEAPONS (touche 6, 7, 8)
   {
-    id: 'tesla', name: 'Fusil à foudre', kind: 'chain', cost: 3, auto: false, interval: 480,
-    dmg: 22, headMul: 1, pellets: 1, spread: 0, range: 32, jumps: 2, jumpRange: 7, jumpMul: 0.7, mag: 20, reload: 2200, falloff: null, speed: 1.0, recoil: 0.6,
+    id: 'laser', name: 'Laser', kind: 'beam', streak: 0, cost: 99, auto: true, interval: 60,
+    dmg: 5, headMul: 1, pellets: 1, spread: 0, range: 70, stun: 1200, mag: 150, reload: 0, noReload: true, falloff: null, speed: 0.9, recoil: 0,
+  },
+  {
+    id: 'carbine', name: 'Carabine', cost: 3, auto: false, interval: 1600,
+    dmg: 110, headMul: 2, pellets: 1, spread: 0, mag: 4, reload: 3000, falloff: null, speed: 0.95, recoil: 2.6,
+  },
+  {
+    id: 'flame', name: 'Lance-flammes', kind: 'flame', streak: 1, cost: 99, auto: true, interval: 50,
+    dmg: 9, headMul: 1, pellets: 1, spread: 0, range: 11, cone: 0.82, mag: 250, reload: 0, noReload: true, falloff: null, speed: 0.95, recoil: 0,
+  },
+  {
+    id: 'nuke', name: 'Missile nucléaire', kind: 'nuke', streak: 2, cost: 99, auto: false, interval: 1000,
+    dmg: 0, headMul: 1, pellets: 1, spread: 0, delay: 4500, mag: 1, reload: 0, noReload: true, falloff: null, speed: 0.9, recoil: 0,
   },
 ];
 
 // Index des armes
-export const W = { AR: 0, SHOTGUN: 1, SNIPER: 2, REVOLVER: 3, KNIFE: 4, ROCKET: 5, EXCALIBUR: 6, GRAPPLE: 7, PORTAL: 8, MINIGUN: 9, GRENADE: 10, TESLA: 11 };
+export const W = { AR: 0, SHOTGUN: 1, SNIPER: 2, REVOLVER: 3, KNIFE: 4, ROCKET: 5, EXCALIBUR: 6, GRAPPLE: 7, PORTAL: 8, MINIGUN: 9, GRENADE: 10, LASER: 11, CARBINE: 12, FLAME: 13, NUKE: 14 };
+
+// Armes de série, dans l'ordre : touches 6, 7, 8 (débloquées à 5, 10, 15 kills d'affilée, pas en Gun Game)
+export const STREAK_WEAPONS = [11, 13, 14];
+export const STREAK_AT = [5, 10, 15];
+export const NUKE_GAS_MS = 30000;   // durée du gaz toxique après le missile
+export const NUKE_GAS_DPS = 6;      // dégâts par seconde du gaz
 
 // Classes : un jeu d'armes (l'ordre = les touches 1, 2, 3...) + vie + vitesse.
 export const CLASSES = {
@@ -111,7 +133,7 @@ export const CLASSES = {
   sniper:    { id: 'sniper',    name: "Tireur d'élite", desc: 'Sniper, revolver, grappin (90 PV)',              weapons: [W.SNIPER, W.REVOLVER, W.GRAPPLE, W.KNIFE],       hp: 90,  speed: 1 },
   heavy:     { id: 'heavy',     name: 'Lourd',          desc: 'Minigun, lance-roquettes, pompe (lent, 150 PV)', weapons: [W.MINIGUN, W.ROCKET, W.SHOTGUN, W.KNIFE],        hp: 150, speed: 0.88 },
   knight:    { id: 'knight',    name: 'Chevalier',      desc: 'Excalibur, revolver, grappin (125 PV)',          weapons: [W.EXCALIBUR, W.REVOLVER, W.GRAPPLE],             hp: 125, speed: 1.02 },
-  scientist: { id: 'scientist', name: 'Scientifique',   desc: "Pistolet portail, foudre, fusil d'assaut",       weapons: [W.PORTAL, W.TESLA, W.AR, W.KNIFE],               hp: 100, speed: 1 },
+  scientist: { id: 'scientist', name: 'Scientifique',   desc: "Pistolet portail, carabine, fusil d'assaut",     weapons: [W.PORTAL, W.CARBINE, W.AR, W.KNIFE],               hp: 100, speed: 1 },
   scout:     { id: 'scout',     name: 'Éclaireur',      desc: 'Pompe, revolver, grappin (rapide, 80 PV)',       weapons: [W.SHOTGUN, W.REVOLVER, W.GRAPPLE, W.KNIFE],      hp: 80,  speed: 1.14 },
 };
 export const CUSTOM_BUDGET = 10;       // points à dépenser pour une classe perso (coût de chaque arme : WEAPONS[i].cost)
@@ -127,7 +149,7 @@ export function resolveClass(id, loadout) {
     const weapons = [];
     for (const v of loadout) {
       const i = Number(v) | 0;
-      if (WEAPONS[i] && !seen.has(i) && weapons.length < CUSTOM_MAX_WEAPONS) { seen.add(i); weapons.push(i); }
+      if (WEAPONS[i] && WEAPONS[i].streak === undefined && !seen.has(i) && weapons.length < CUSTOM_MAX_WEAPONS) { seen.add(i); weapons.push(i); }
     }
     if (weapons.length && weaponCost(weapons) <= CUSTOM_BUDGET) return { id: 'custom', name: 'Perso', desc: '', weapons, hp: 100, speed: 1 };
   }
