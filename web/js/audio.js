@@ -155,6 +155,9 @@ class Sfx {
         this._burst({ dur: 0.9, type: 'lowpass', freq: 1600, freqEnd: 90, gain: 1.7, out });
         this._tone({ dur: 0.6, freq: 80, freqEnd: 25, type: 'sawtooth', gain: 0.9, out });
         break;
+      case 'throw':
+        this._burst({ dur: 0.18, type: 'bandpass', freq: 900, freqEnd: 300, q: 0.7, gain: 0.35, out });
+        break;
       case 'tick': // impact probable, joué tout de suite (avant la confirmation du serveur)
         this._tone({ dur: 0.04, freq: 1000, type: 'square', gain: 0.1, out });
         break;

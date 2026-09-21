@@ -10,11 +10,11 @@ import { WebSocketServer } from 'ws';
 import {
   TICK_MS, REWIND_MAX_MS, MAX_RAY, EYE_HEIGHT, MAX_HP, RESPAWN_MS, SPAWN_PROTECT_MS,
   REGEN_DELAY_MS, REGEN_PER_S, END_SCREEN_MS, BODY_HALF, BODY_TOP, HEAD_HALF, HEAD_TOP,
-  MODES, WEAPONS, GUN_ORDER, KNIFE, CLASSES, resolveClass, W, STREAK_WEAPONS, STREAK_AT, NUKE_GAS_MS, NUKE_GAS_DPS,
+  MODES, WEAPONS, GUN_ORDER, KNIFE, CLASSES, resolveClass, W, STREAK_WEAPONS, STREAK_AT, NUKE_GAS_MS, NUKE_GAS_DPS, NADE_MAX, NADE_REGEN_MS,
 } from '../web/shared/config.js';
 import { MAPS, mapById } from '../web/shared/map.js';
 import { rayAABB, applySpread, mulberry32, clamp } from '../web/shared/util.js';
-import { BOT_NAMES, newBotAI, botStep } from './bots.js';
+import { BOT_NAMES, newBotAI, botStep, botClass } from './bots.js';
 
 const STREAKS = process.env.STREAKS ? process.env.STREAKS.split(',').map(Number) : STREAK_AT; // kills d'affilée pour le laser, le lance-flammes, le missile
 
@@ -190,6 +190,7 @@ function newPlayer(room, id, ws, name, team) {
     token: null, away: false, graceUntil: 0, leaving: false,
     cls: CLASSES.classic, pending: null, loadout: CLASSES.classic.weapons.slice(), maxHp: MAX_HP, speedMul: 1, pull: null,
     streak: 0, streakAmmo: {}, stunUntil: 0, altUntil: {},
+    nades: 0, nadeReady: 0, nadeRegenAt: 0, st: newStats(),
     respawnAt: 0, protectUntil: 0, lastDamage: 0, nextFire: 0,
     hist: [],
   };
@@ -292,8 +293,28 @@ function pickSpawn(room, p) {
   return scored[0].s;
 }
 
+// Statistiques de manche (écran de fin)
+function newStats() { return { shots: 0, hits: 0, dmg: 0, head: 0, bestStreak: 0, byWeapon: {} }; }
+// Seules les armes « de visée » comptent pour la précision (pas le laser/flammes, grappin, portail, missile)
+const countsAcc = (wi) => { const w = WEAPONS[wi]; return !!w && w.streak === undefined && !w.item && w.kind !== 'portal' && w.kind !== 'grapple'; };
+
+function statsMsg(room) {
+  const rows = [];
+  let mvp = null;
+  for (const p of room.players.values()) {
+    const s = p.st;
+    let fav = -1, fn = 0;
+    for (const [wi, n] of Object.entries(s.byWeapon)) if (n > fn) { fn = n; fav = +wi; }
+    const acc = s.shots ? Math.min(100, Math.round((100 * s.hits) / s.shots)) : 0;
+    rows.push([p.id, p.k, p.d, Math.round(s.dmg), acc, s.head, s.bestStreak, fav]);
+    if (!mvp || p.k > mvp.k || (p.k === mvp.k && s.dmg > mvp.st.dmg)) mvp = p;
+  }
+  return { rows, mvp: mvp ? mvp.id : null };
+}
+
 // Applique la classe (choisie à l'arrivée, ou changée depuis la pause : effet à la réapparition)
 function applyClass(room, p) {
+  if (p.bot && room.mode !== 'gun') p.pending = botClass(p.ai.diff);   // les bots changent de classe à chaque réapparition
   if (p.pending) { p.cls = p.pending; p.pending = null; }
   if (room.mode === 'gun') { p.loadout = [GUN_ORDER[shownLevel(p)], KNIFE]; p.maxHp = MAX_HP; p.speedMul = 1; }
   else { p.loadout = p.cls.weapons.slice(); p.maxHp = p.cls.hp; p.speedMul = p.cls.speed; }
@@ -307,10 +328,11 @@ function spawnPlayer(room, p, now = Date.now()) {
   p.x = s.x; p.y = 0; p.z = s.z; p.yaw = s.yaw; p.pitch = 0;
   p.vx = p.vy = p.vz = 0; p.onGround = true;
   p.hp = p.maxHp; p.alive = true; p.pull = null; p.stunUntil = 0;
+  p.nades = room.mode === 'gun' ? 0 : NADE_MAX; p.nadeRegenAt = 0; p.nadeReady = 0;
   p.protectUntil = now + PROTECT;
   p.lastDamage = 0; p.nextFire = 0;
   p.hist = [];
-  send(p, { t: 'spawn', x: s.x, y: 0, z: s.z, yaw: s.yaw, hp: p.maxHp, maxHp: p.maxHp, loadout: p.loadout, speed: p.speedMul });
+  send(p, { t: 'spawn', x: s.x, y: 0, z: s.z, yaw: s.yaw, hp: p.maxHp, maxHp: p.maxHp, loadout: p.loadout, speed: p.speedMul, nades: p.nades });
 }
 
 function resetMatch(room) {
@@ -319,7 +341,7 @@ function resetMatch(room) {
   room.nuke = null;
   if (room.gas) { room.gas = null; broadcast(room, { t: 'gas', off: 1 }); }
   room.state = room.cfg.id === 'duel' && room.players.size < 2 ? 'waiting' : 'playing';
-  for (const p of room.players.values()) { p.k = 0; p.d = 0; p.level = 0; p.streak = 0; }
+  for (const p of room.players.values()) { p.k = 0; p.d = 0; p.level = 0; p.streak = 0; p.st = newStats(); }
   broadcast(room, { t: 'state', s: room.state, win: null });
   broadcast(room, scoreMsg(room));
   const now = Date.now();
@@ -470,31 +492,76 @@ function stepProjectiles(room, now, dt) {
     const nvy = P.vy - pr.gravity * dt;
     const dx = P.vx * dt, dy = nvy * dt, dz = P.vz * dt;
     const len = Math.hypot(dx, dy, dz);
-    let tHit = len + 1, direct = null;
+    let tHit = len + 1, direct = null, hitBox = null, ground = false;
     let ux = 0, uy = 0, uz = 0;
     if (len > 0) {
       ux = dx / len; uy = dy / len; uz = dz / len;
       const m = rayMap(room.map, P.x, P.y, P.z, ux, uy, uz, len);
-      if (m.box) tHit = m.t;
-      if (uy < 0 && P.y + dy <= 0) tHit = Math.min(tHit, Math.max(0, -P.y / uy)); // sol
-      for (const q of room.players.values()) {
-        if (!q.alive || now < q.protectUntil) continue;
-        if (q === P.owner && now - P.born < 150) continue;   // ne pas se toucher soi-même au départ
-        const tb = rayAABB(P.x, P.y, P.z, ux, uy, uz, q.x - 0.35, q.y, q.z - 0.35, q.x + 0.35, q.y + 1.85, q.z + 0.35, Math.min(tHit, len));
-        if (tb >= 0 && tb < tHit) { tHit = tb; direct = q; }
+      if (m.box) { tHit = m.t; hitBox = m.box; }
+      if (uy < 0 && P.y + dy <= 0) { // sol
+        const tg = Math.max(0, -P.y / uy);
+        if (tg < tHit) { tHit = tg; hitBox = null; ground = true; }
+      }
+      if (!pr.bounce) { // les grenades à main rebondissent sur tout (joueurs compris) : seules les roquettes touchent de plein fouet
+        for (const q of room.players.values()) {
+          if (!q.alive || now < q.protectUntil) continue;
+          if (q === P.owner && now - P.born < 150) continue;   // ne pas se toucher soi-même au départ
+          const tb = rayAABB(P.x, P.y, P.z, ux, uy, uz, q.x - 0.35, q.y, q.z - 0.35, q.x + 0.35, q.y + 1.85, q.z + 0.35, Math.min(tHit, len));
+          if (tb >= 0 && tb < tHit) { tHit = tb; direct = q; }
+        }
       }
     }
-    if (tHit <= len) {
+    if (tHit <= len && !pr.bounce) {
       // on recule un peu pour ne pas exploser "dans" le mur (sinon l'explosion se croit à couvert)
       const back = Math.min(tHit, 0.2);
       explode(room, P, { x: P.x + ux * (tHit - back), y: Math.max(0.1, P.y + uy * (tHit - back)), z: P.z + uz * (tHit - back) }, now, direct);
       continue;
     }
     if (now - P.born > pr.life * 1000) { explode(room, P, { x: P.x, y: Math.max(0.1, P.y), z: P.z }, now); continue; }
+    if (tHit <= len) { // grenade à main : rebond
+      const tt = Math.max(0, tHit - 0.02);
+      P.x += ux * tt; P.y += uy * tt; P.z += uz * tt;
+      if (ground) P.y = Math.max(P.y, 0.06);
+      const n = ground ? { nx: 0, ny: 1, nz: 0 } : hitNormal(hitBox, P.x + ux * 0.02, P.y + uy * 0.02, P.z + uz * 0.02);
+      let vx = P.vx, vy = nvy, vz = P.vz;
+      const vn = vx * n.nx + vy * n.ny + vz * n.nz;
+      if (vn < 0) { const k = (1 + pr.bounce) * vn; vx -= k * n.nx; vy -= k * n.ny; vz -= k * n.nz; }
+      vx *= 0.9; vz *= 0.9;
+      if (ground && Math.abs(vn) < 1.2) { // au repos : elle roule en ralentissant
+        vy = 0; vx *= 0.7; vz *= 0.7;
+        if (!P.rest) { P.rest = true; broadcast(room, { t: 'pbounce', id: P.id, o: [r2(P.x), r2(P.y), r2(P.z)], v: [r2(vx), 0, r2(vz)] }); }
+      } else {
+        P.rest = false;
+        broadcast(room, { t: 'pbounce', id: P.id, o: [r2(P.x), r2(P.y), r2(P.z)], v: [r2(vx), r2(vy), r2(vz)] });
+      }
+      P.vx = vx; P.vy = vy; P.vz = vz;
+      keep.push(P);
+      continue;
+    }
     P.x += dx; P.y += dy; P.z += dz; P.vy = nvy;
+    if (P.rest) { P.vx *= 0.94; P.vz *= 0.94; }
     keep.push(P);
   }
   room.projs = keep;
+}
+
+// ---- grenade à main (touche G) : lancée dans la direction visée, rebondit, explose après 2,4 s ----
+function handleNade(p, m, now) {
+  const room = p.room;
+  if (!p.alive || room.state === 'ended' || room.mode === 'gun' || now < p.stunUntil) return;
+  if (p.nades <= 0 || now < p.nadeReady) return;
+  let dx = +m.dx, dy = +m.dy, dz = +m.dz;
+  if (!Number.isFinite(dx + dy + dz)) return;
+  const dl = Math.hypot(dx, dy, dz);
+  if (dl < 0.5) return;
+  dx /= dl; dy /= dl; dz /= dl;
+  const o = [p.x, p.y + EYE_HEIGHT, p.z];
+  p.nades--;
+  p.nadeReady = now + 800;
+  if (!p.nadeRegenAt) p.nadeRegenAt = now + NADE_REGEN_MS;
+  p.protectUntil = 0;
+  fireProjectile(room, p, WEAPONS[W.FRAG], W.FRAG, o, [dx, dy, dz], now);
+  if (!p.bot) send(p, { t: 'nades', n: p.nades });
 }
 
 // ---- épée (Excalibur) : touche tous les ennemis dans un arc devant soi ----
@@ -649,6 +716,7 @@ function handleFire(p, m, now) {
   if (now + 100 < p.nextFire) return;
   p.nextFire = Math.max(p.nextFire, now - 60) + w.interval;
   p.protectUntil = 0; // tirer annule la protection d'apparition
+  if (countsAcc(wi)) p.st.shots++;
   if (w.streak !== undefined && --p.streakAmmo[wi] <= 0) { // un seul chargeur : arme retirée une fois vide
     p.loadout = p.loadout.filter((i) => i !== wi);
     if (p.weapon === wi) p.weapon = p.loadout[0];
@@ -725,10 +793,17 @@ function handleFire(p, m, now) {
 
 function applyDamage(room, atk, vic, amount, head, wi, now) {
   if (!vic.alive || room.state === 'ended') return;
+  const suicide = atk === vic;
+  if (!suicide) {
+    const real = Math.min(amount, Math.max(0, vic.hp));
+    atk.st.dmg += real;
+    if (countsAcc(wi)) atk.st.hits++;
+    if (head) atk.st.head++;
+    if (vic.bot && vic.ai) vic.ai.alert = { x: atk.x, z: atk.z, until: now + 6000 }; // un bot touché va voir d'où ça vient
+  }
   vic.hp -= amount;
   vic.lastDamage = now;
   const dead = vic.hp <= 0;
-  const suicide = atk === vic;
   if (!suicide) send(atk, { t: 'hit', v: vic.id, d: Math.round(amount), h: head ? 1 : 0, k: dead ? 1 : 0 });
   if (!dead) {
     send(vic, { t: 'dmg', a: atk.id, hp: Math.ceil(vic.hp), x: r2(atk.x), z: r2(atk.z) });
@@ -742,6 +817,8 @@ function applyDamage(room, atk, vic, amount, head, wi, now) {
     return;
   }
   atk.k++; atk.streak++;
+  atk.st.bestStreak = Math.max(atk.st.bestStreak, atk.streak);
+  atk.st.byWeapon[wi] = (atk.st.byWeapon[wi] || 0) + 1;
   if (room.cfg.teams) room.teamKills[atk.team]++;
   if (room.mode === 'gun') {
     // un frag avec l'arme du niveau (ou au couteau) fait monter d'un niveau ; un frag au couteau fait aussi descendre la victime
@@ -770,7 +847,7 @@ function checkWin(room, lastKiller, now) {
   room.state = 'ended';
   room.winner = winner;
   room.endAt = now + END_SCREEN_MS;
-  broadcast(room, { t: 'state', s: 'ended', win: winner, until: room.endAt });
+  broadcast(room, { t: 'state', s: 'ended', win: winner, until: room.endAt, stats: statsMsg(room) });
 }
 
 // ---------------------------------------------------------------- Messages ----
@@ -855,6 +932,8 @@ function handleMessage(ws, raw) {
     if (p.loadout.includes(wi)) p.weapon = wi;
   } else if (m.t === 'fire') {
     handleFire(p, m, now);
+  } else if (m.t === 'nade') {
+    handleNade(p, m, now);
   }
 }
 
@@ -885,7 +964,12 @@ setInterval(() => {
       }
       if (p.bot && p.alive && room.state === 'playing' && now >= p.stunUntil) {
         const f = botStep(room, p, now, TICK_MS / 1000);
-        if (f) handleFire(p, f, now);
+        if (f) { if (f.nade) handleNade(p, f, now); else handleFire(p, f, now); }
+      }
+      if (p.alive && p.nades < NADE_MAX && p.nadeRegenAt && now >= p.nadeRegenAt && room.mode !== 'gun') {
+        p.nades++;
+        p.nadeRegenAt = p.nades < NADE_MAX ? now + NADE_REGEN_MS : 0;
+        if (!p.bot) send(p, { t: 'nades', n: p.nades });
       }
       if (p.alive) {
         if (p.hp < p.maxHp && now - p.lastDamage > REGEN_DELAY_MS) p.hp = Math.min(p.maxHp, p.hp + REGEN_PER_S * (TICK_MS / 1000));

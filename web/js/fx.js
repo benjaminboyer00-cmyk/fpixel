@@ -84,14 +84,22 @@ export class Fx {
     this.burst(x, y, z, '#5b5b5b', 10, r * 1.2, 0.9);
   }
 
-  addProj(id, kind, x, y, z, vx, vy, vz, g) {
-    const grenade = kind === 'grenade';
+  addProj(id, kind, x, y, z, vx, vy, vz, g, bounce = 0) {
+    const grenade = kind === 'grenade' || kind === 'frag';
     const m = new THREE.Mesh(
       new THREE.BoxGeometry(grenade ? 0.24 : 0.16, grenade ? 0.24 : 0.16, grenade ? 0.24 : 0.5),
       new THREE.MeshBasicMaterial({ color: grenade ? 0x4d5a3d : 0xd9d9d9, fog: false }));
     m.position.set(x, y, z);
     this.scene.add(m);
-    this.projs.set(id, { m, vx, vy, vz, g, trail: 0, grenade });
+    this.projs.set(id, { m, vx, vy, vz, g, trail: 0, grenade, bounce });
+  }
+
+  // Rebond calculé par le serveur : on recale la position et la vitesse
+  bounceProj(id, o, v) {
+    const p = this.projs.get(id);
+    if (!p) return;
+    p.m.position.set(o[0], o[1], o[2]);
+    p.vx = v[0]; p.vy = v[1]; p.vz = v[2];
   }
 
   removeProj(id) {
@@ -180,6 +188,10 @@ export class Fx {
     for (const p of this.projs.values()) {
       p.vy -= p.g * dt;
       p.m.position.x += p.vx * dt; p.m.position.y += p.vy * dt; p.m.position.z += p.vz * dt;
+      if (p.bounce && p.m.position.y < 0.12) { // grenade à main : elle roule sur le sol
+        p.m.position.y = 0.12; if (p.vy < 0) p.vy = 0;
+        const f = Math.pow(0.94, dt / 0.033); p.vx *= f; p.vz *= f;
+      }
       if (!p.grenade) p.m.lookAt(p.m.position.x + p.vx, p.m.position.y + p.vy, p.m.position.z + p.vz);
       p.trail -= dt;
       if (p.trail <= 0) { p.trail = 0.035; this.burst(p.m.position.x, p.m.position.y, p.m.position.z, p.grenade ? '#8a8a8a' : '#ffb04a', 1, 0.6, 0.4); }

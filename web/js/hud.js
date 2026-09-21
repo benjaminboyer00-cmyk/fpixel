@@ -1,5 +1,5 @@
 // Tout ce qui est affiché par-dessus le jeu (DOM). Les noms de joueurs passent par textContent.
-import { WEAPONS, TEAM_COLORS, FFA_COLORS, MODES, GUN_ORDER } from '../shared/config.js';
+import { WEAPONS, TEAM_COLORS, FFA_COLORS, MODES, GUN_ORDER, NADE_MAX } from '../shared/config.js';
 
 const $ = (id) => document.getElementById(id);
 const teamName = { red: 'ROUGE', blue: 'BLEU' };
@@ -147,6 +147,17 @@ export class Hud {
     this.hintT = setTimeout(() => e.classList.remove('on'), ms);
   }
 
+  // Grenades à main restantes (touche G)
+  setNades(n, show = true) {
+    this._set('nades', 'nades', show ? n : -1, (e) => { e.textContent = show ? `G · Grenade ${'●'.repeat(n)}${'○'.repeat(Math.max(0, NADE_MAX - n))}` : ''; });
+  }
+
+  // Statistiques de fin de manche (null = masquées) : rows = [id, frags, morts, dégâts, précision %, têtes, série max, arme préférée]
+  setStats(rows, mvp = null) {
+    this.stats = rows ? new Map(rows.map((r) => [r[0], r])) : null;
+    this.mvp = mvp;
+  }
+
   // Petite ligne d'aide sous l'arme (tir secondaire, recharge de l'onde...)
   setSpecial(text) { this._set('special', 'special', text, (e, v) => { e.textContent = v; }); }
 
@@ -212,11 +223,18 @@ export class Hud {
     const gun = mode === 'gun';
     const table = (list, title, color) => {
       const t = el('table');
-      t.append(el('tr', {}, el('th', { textContent: 'Joueur' }), ...(gun ? [el('th', { textContent: 'Niveau' })] : []), el('th', { textContent: 'Frags' }), el('th', { textContent: 'Morts' })));
+      const st = this.stats;
+      t.append(el('tr', {}, el('th', { textContent: 'Joueur' }), ...(gun ? [el('th', { textContent: 'Niveau' })] : []), el('th', { textContent: 'Frags' }), el('th', { textContent: 'Morts' }),
+        ...(st ? ['Dégâts', 'Préc.', 'Têtes', 'Série', 'Arme'].map((h) => el('th', { textContent: h })) : [])));
       const order = gun ? (a, b) => (b.lvl - a.lvl) || (b.k - a.k) : (a, b) => b.k - a.k || a.d - b.d;
       for (const p of [...list].sort(order)) {
         const tr = el('tr', p.id === meId ? { className: 'me' } : {});
         tr.append(el('td', { textContent: p.name, style: `color:${playerColor(mode, p)}` }), ...(gun ? [el('td', { textContent: `${p.lvl + 1}/${GUN_ORDER.length}` })] : []), el('td', { textContent: p.k }), el('td', { textContent: p.d }));
+        const r = st?.get(p.id);
+        if (r) {
+          if (this.mvp === p.id) tr.firstChild.textContent = `★ ${p.name}`;
+          tr.append(el('td', { textContent: r[3] }), el('td', { textContent: `${r[4]}%` }), el('td', { textContent: r[5] }), el('td', { textContent: r[6] }), el('td', { textContent: WEAPONS[r[7]]?.name ?? '—' }));
+        }
         t.append(tr);
       }
       const wrap = el('div');

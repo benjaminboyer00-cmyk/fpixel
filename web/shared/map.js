@@ -189,4 +189,56 @@ function buildVillage() {
   };
 }
 
-export const MAPS = { arena: buildArena(), village: buildVillage() };
+// ---------------------------------------------------------------- Entrepôt (petite, intérieure) ----
+function buildWarehouse() {
+  const half = 26;
+  const { boxes, add, mirror4, enclose, wall } = builder(half);
+  enclose(7, 'concrete');
+  add(0, 0, 2 * half + 2, 2 * half + 2, 0.5, 7, 'roof');   // plafond
+
+  // Bureau central : 4 murs percés de portes + toit
+  const o = 4.2;
+  for (const s of [1, -1]) {
+    wall('x', s * o, -o, o, 3, [{ a: -0.8, b: 0.8, y0: 0, y1: 2.3 }], 'plaster');
+    wall('z', s * o, -o, o, 3, [{ a: -0.8, b: 0.8, y0: 0, y1: 2.3 }], 'plaster');
+  }
+  add(0, 0, 9.2, 9.2, 0.35, 3, 'roof');
+  add(0, 0, 1.6, 0.9, 0.85, 0, 'wood');
+
+  // Passerelles surélevées (haut 3) sur les côtés, escaliers aux deux bouts, garde-corps côté mur
+  for (const sx of [1, -1]) {
+    add(sx * 21, 0, 5, 24, 3.0, 0, 'platform');
+    add(sx * 23.75, 0, 0.5, 24, 1.0, 3.0, 'fence');
+    for (const sz of [1, -1]) {
+      for (let j = 1; j <= 6; j++) add(sx * 21, sz * (12 + (7 - j) - 0.5), 3, 1, 0.5 * j, 0, 'stairs');
+    }
+  }
+
+  // Conteneurs, étagères, caisses, piliers (symétriques)
+  mirror4(8, 15, 6, 2.5, 2.6, 0, 'metal');
+  mirror4(13, 6.5, 2.5, 6, 2.6, 0, 'metal');
+  mirror4(4, 8.5, 0.8, 7, 2.2, 0, 'crateDark');
+  mirror4(6, 3, 1.2, 1.2, 1.2, 0, 'crate');
+  mirror4(16, 10, 1.2, 1.2, 1.2, 0, 'crate');
+  mirror4(2, 19, 2, 2, 2, 0, 'crate');
+  mirror4(12, 12, 1.2, 1.2, 7, 0, 'pillar');
+  mirror4(17, 17.5, 1.2, 1.2, 7, 0, 'pillar');
+  mirror4(10, 21, 4, 0.6, 1.0, 0, 'low');
+
+  const spawns = [];
+  for (const x of [-16, -8, 0, 8, 16]) {
+    spawns.push({ x, z: -22, yaw: Math.PI, team: 'red' });
+    spawns.push({ x, z: 22, yaw: 0, team: 'blue' });
+  }
+  for (const sx of [1, -1]) {
+    for (const sz of [1, -1]) spawns.push({ x: sx * 15, z: sz * 2, yaw: sx > 0 ? Math.PI / 2 : -Math.PI / 2, team: null });
+  }
+
+  return {
+    id: 'warehouse', name: 'Entrepôt', desc: 'Petite carte intérieure : conteneurs, couloirs et passerelles',
+    half, boxes, spawns, interiors: [],
+    sky: '#23262c', fog: [10, 48], floor: '#57575c',
+  };
+}
+
+export const MAPS = { arena: buildArena(), village: buildVillage(), warehouse: buildWarehouse() };

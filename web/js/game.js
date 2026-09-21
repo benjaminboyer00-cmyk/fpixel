@@ -51,6 +51,7 @@ export class Game {
     this.shake = 0;
     this.interp = INTERP_MS;    // retard d'affichage des autres joueurs (ms), ajusté à la gigue du réseau
     this._jit = 0; this._lastSnapAt = 0; this._predAt = 0;
+    this.mvp = null; this.onMatchEnd = null;
     this.nukeAt = 0;            // heure d'impact du missile nucléaire en vol
     this.gas = null;            // gaz toxique : { owner, until }
     this.running = false;
@@ -125,7 +126,7 @@ export class Game {
     const loadout = this.gun ? [GUN_ORDER[level], KNIFE] : resolveClass(s0.cls, s0.custom).weapons.slice();
     this.me = {
       x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, onGround: true, yaw: 0, pitch: 0,
-      level, loadout, maxHp: MAX_HP, speedMul: 1, pull: null, portalUntil: 0, stunUntil: 0, altUntil: {}, jumpPrev: false,
+      level, loadout, maxHp: MAX_HP, speedMul: 1, nades: 0, nadeReady: 0, pull: null, portalUntil: 0, stunUntil: 0, altUntil: {}, jumpPrev: false,
       hp: MAX_HP, alive: false, spawned: false, weapon: loadout[0], ammo: WEAPONS.map((w) => w.mag),
       reloadUntil: 0, nextFire: 0, switchUntil: 0, scoped: false, scopeToggle: false,
       respawnAt: 0, killer: null, deadT: 0, prot: 0, lastSend: 0,
@@ -138,6 +139,7 @@ export class Game {
     if (welcome.gas) this._setGas({ owner: welcome.gas.owner, ms: welcome.gas.ms });
     this.viewmodel.setWeapon(this.me.weapon);
     this.hud.setLoadout(loadout);
+    this.hud.setStats(null);
     this.fov = 0;
     this._applyFov(true);
     this.scoreDirty = true;
@@ -269,9 +271,11 @@ export class Game {
       this.scoreDirty = true;
     });
     n.on('proj', (m) => {
-      const id = WEAPONS[m.w]?.id;
-      this.fx.addProj(m.id, id, m.o[0], m.o[1], m.o[2], m.v[0], m.v[1], m.v[2], m.g);
+      const w = WEAPONS[m.w];
+      this.fx.addProj(m.id, w?.id, m.o[0], m.o[1], m.o[2], m.v[0], m.v[1], m.v[2], m.g, w?.proj?.bounce || 0);
     });
+    n.on('pbounce', (m) => this.fx.bounceProj(m.id, m.o, m.v));
+    n.on('nades', (m) => { if (this.me) this.me.nades = m.n; });
     n.on('boom', (m) => {
       this.fx.removeProj(m.id);
       this.fx.explosion(m.x, m.y, m.z, m.r);
@@ -348,7 +352,13 @@ export class Game {
         const w = m.win;
         const mine = w && (w.team ? w.team === this.myTeam() : w.id === this.myId);
         if (mine) sfx.play('win');
-      }
+        if (m.stats) {
+          this.hud.setStats(m.stats.rows, m.stats.mvp);
+          this.mvp = m.stats.mvp;
+          const row = m.stats.rows.find((r) => r[0] === this.myId);
+          if (row) this.onMatchEnd?.(row, !!mine);
+        }
+      } else { this.hud.setStats(null); this.mvp = null; }
       this.scoreDirty = true;
     });
   }
@@ -360,7 +370,7 @@ export class Game {
     me.yaw = m.yaw; me.pitch = 0;
     me.hp = m.hp; me.alive = true; me.spawned = true; me.deadT = 0; me.killer = null;
     me.ammo = WEAPONS.map((w) => w.mag);
-    me.reloadUntil = 0; me.nextFire = 0; me.scopeToggle = false; me.pull = null;
+    me.reloadUntil = 0; me.nextFire = 0; me.scopeToggle = false; me.pull = null; me.nades = m.nades ?? 0;
     if (m.loadout) {
       me.loadout = m.loadout.slice();
       me.maxHp = m.maxHp ?? MAX_HP;
@@ -495,6 +505,7 @@ export class Game {
 
       // --- rechargement ---
       if (inp.takeReload()) this._startReload(now);
+      if (inp.takeNade()) this._throwNade(now);
 
       // --- zoom sniper ---
       if (inp.takeScopeToggle()) me.scopeToggle = !me.scopeToggle;
@@ -689,6 +700,18 @@ export class Game {
     this.viewmodel.setWeapon(i);
   }
 
+  // Grenade à main (touche G) : lancée en cloche dans la direction du regard, rebondit et explose après 2,4 s
+  _throwNade(now) {
+    const me = this.me;
+    if (this.gun || this.state === 'ended' || me.nades <= 0 || now < me.nadeReady || now < me.stunUntil) return;
+    me.nades--; me.nadeReady = now + 800;
+    const [dx, dy, dz] = lookDir(me.yaw, me.pitch);
+    const up = dy + 0.22, l = Math.hypot(dx, up, dz);   // un peu vers le haut, comme un vrai lancer
+    this.net.send({ t: 'nade', dx: +(dx / l).toFixed(4), dy: +(up / l).toFixed(4), dz: +(dz / l).toFixed(4) });
+    this.viewmodel.fire();
+    sfx.play('throw');
+  }
+
   _startReload(now) {
     const me = this.me, w = WEAPONS[me.weapon];
     if (!w.mag || w.noReload || me.reloadUntil || me.ammo[me.weapon] >= w.mag) return;
@@ -849,7 +872,7 @@ export class Game {
       if (w?.team) title = `L'équipe ${w.team === 'red' ? 'ROUGE' : 'BLEUE'} gagne !`;
       else if (w) title = w.id === this.myId ? 'VICTOIRE !' : `${this._name(w.id)} gagne !`;
       const left = Math.max(0, Math.ceil((this.until - this.net.serverNow()) / 1000));
-      return this.hud.banner(title, `Nouvelle manche dans ${left}s`);
+      return this.hud.banner(title, `${this.mvp != null ? `MVP : ${this._name(this.mvp)} · ` : ''}Nouvelle manche dans ${left}s`);
     }
     return this.hud.banner(null);
   }
@@ -857,6 +880,7 @@ export class Game {
   _updateHud(now) {
     const me = this.me;
     this.hud.setHp(me.alive ? me.hp : 0, me.maxHp);
+    this.hud.setNades(me.nades, !this.gun);
     this.hud.setWeapon(me.weapon, me.ammo[me.weapon], !!me.reloadUntil);
     const cw = WEAPONS[me.weapon];
     let special = '';

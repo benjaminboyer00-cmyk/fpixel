@@ -50,9 +50,9 @@ export const WEAPONS = [
     mag: 30, reload: 1900, falloff: [35, 90, 0.6], speed: 1.0, recoil: 0.5,
   },
   {
-    id: 'shotgun', name: 'Fusil à pompe', key: '2', auto: false, interval: 850, cost: 2,
-    dmg: 13, headMul: 1.0, pellets: 8, spread: 0.065,
-    mag: 6, reload: 2400, falloff: [6, 22, 0.2], speed: 1.02, recoil: 1.6,
+    id: 'shotgun', name: 'Fusil à pompe', key: '2', auto: false, interval: 900, cost: 2,
+    dmg: 18, headMul: 1.0, pellets: 9, spread: 0.055,
+    mag: 6, reload: 2400, falloff: [8, 26, 0.15], speed: 1.02, recoil: 1.8,
   },
   {
     id: 'sniper', name: 'Sniper', key: '3', auto: false, interval: 1400, cost: 3,
@@ -117,10 +117,20 @@ export const WEAPONS = [
     id: 'nuke', name: 'Missile nucléaire', kind: 'nuke', streak: 2, cost: 99, auto: false, interval: 1000,
     dmg: 0, headMul: 1, pellets: 1, spread: 0, delay: 4500, mag: 1, reload: 0, noReload: true, falloff: null, speed: 0.9, recoil: 0,
   },
+  // ---- équipement (index 15) : grenade à main pour tout le monde (touche G), pas une arme de classe ----
+  {
+    id: 'frag', name: 'Grenade', kind: 'nade', item: true, cost: 99, auto: false, interval: 1000,
+    dmg: 105, headMul: 1, pellets: 1, spread: 0, mag: 0, reload: 0, falloff: null, speed: 1, recoil: 0,
+    proj: { speed: 19, gravity: 18, life: 2.4, radius: 4.2, minMul: 0.2, self: 0.6, knock: 12, bounce: 0.45 },
+  },
 ];
 
 // Index des armes
-export const W = { AR: 0, SHOTGUN: 1, SNIPER: 2, REVOLVER: 3, KNIFE: 4, ROCKET: 5, EXCALIBUR: 6, GRAPPLE: 7, PORTAL: 8, MINIGUN: 9, GRENADE: 10, LASER: 11, CARBINE: 12, FLAME: 13, NUKE: 14 };
+export const W = { AR: 0, SHOTGUN: 1, SNIPER: 2, REVOLVER: 3, KNIFE: 4, ROCKET: 5, EXCALIBUR: 6, GRAPPLE: 7, PORTAL: 8, MINIGUN: 9, GRENADE: 10, LASER: 11, CARBINE: 12, FLAME: 13, NUKE: 14, FRAG: 15 };
+
+// Grenades à main : 2 en réserve, une revient toutes les 12 s
+export const NADE_MAX = 2;
+export const NADE_REGEN_MS = 12000;
 
 // Armes de série, dans l'ordre : touches 6, 7, 8 (débloquées à 5, 10, 15 kills d'affilée, pas en Gun Game)
 export const STREAK_WEAPONS = [11, 13, 14];
@@ -151,7 +161,7 @@ export function resolveClass(id, loadout) {
     const weapons = [];
     for (const v of loadout) {
       const i = Number(v) | 0;
-      if (WEAPONS[i] && WEAPONS[i].streak === undefined && !seen.has(i) && weapons.length < CUSTOM_MAX_WEAPONS) { seen.add(i); weapons.push(i); }
+      if (WEAPONS[i] && WEAPONS[i].streak === undefined && !WEAPONS[i].item && !seen.has(i) && weapons.length < CUSTOM_MAX_WEAPONS) { seen.add(i); weapons.push(i); }
     }
     if (weapons.length && weaponCost(weapons) <= CUSTOM_BUDGET) return { id: 'custom', name: 'Perso', desc: '', weapons, hp: 100, speed: 1 };
   }

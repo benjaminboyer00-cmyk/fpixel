@@ -9,6 +9,26 @@ import { MODES } from '../shared/config.js';
 import { MAPS } from '../shared/map.js';
 import { mountClassPicker } from './classes-ui.js';
 
+// Stats cumulées, gardées dans ce navigateur (aucun serveur de stockage nécessaire)
+const STATS_KEY = 'fpixel-stats-v1';
+function loadStats() {
+  try { return { matches: 0, wins: 0, kills: 0, deaths: 0, dmg: 0, head: 0, best: 0, ...JSON.parse(localStorage.getItem(STATS_KEY) || '{}') }; } catch { return { matches: 0, wins: 0, kills: 0, deaths: 0, dmg: 0, head: 0, best: 0 }; }
+}
+function showStats() {
+  const s = loadStats(), el = document.getElementById('mystats');
+  if (!el) return;
+  el.textContent = s.matches
+    ? `Parties ${s.matches} · Victoires ${s.wins} (${Math.round((100 * s.wins) / s.matches)} %) · Frags ${s.kills} · Morts ${s.deaths} (K/D ${(s.kills / Math.max(1, s.deaths)).toFixed(2)}) · Dégâts ${s.dmg} · Têtes ${s.head} · Meilleure série ${s.best}`
+    : 'Pas encore de partie terminée.';
+}
+function recordMatch(row, won) { // row = [id, frags, morts, dégâts, précision, têtes, série max, arme]
+  const s = loadStats();
+  s.matches++; if (won) s.wins++;
+  s.kills += row[1]; s.deaths += row[2]; s.dmg += row[3]; s.head += row[5]; s.best = Math.max(s.best, row[6]);
+  try { localStorage.setItem(STATS_KEY, JSON.stringify(s)); } catch { /* navigation privée */ }
+  showStats();
+}
+
 const $ = (id) => document.getElementById(id);
 const settings = loadSettings();
 if (isTouch) document.body.classList.add('touch');
@@ -55,6 +75,7 @@ function selectMode(m) {
 document.querySelectorAll('.mode').forEach((b) => b.addEventListener('click', () => selectMode(b.dataset.mode)));
 selectMode(settings.mode);
 
+showStats();
 // carte + classe
 for (const m of Object.values(MAPS)) $('map').append(Object.assign(document.createElement('option'), { value: m.id, textContent: m.name }));
 if (!MAPS[settings.map]) settings.map = 'arena';
@@ -145,7 +166,7 @@ async function play() {
   setStatus('wait', 'Connexion au serveur…');
 
   try {
-    if (!game) game = new Game({ canvas: $('game'), input, net, hud, getSettings: () => settings });
+    if (!game) { game = new Game({ canvas: $('game'), input, net, hud, getSettings: () => settings }); game.onMatchEnd = recordMatch; }
   } catch (e) {
     console.error(e);
     return showMenu("WebGL n'est pas disponible sur cet appareil/navigateur.");

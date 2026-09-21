@@ -39,7 +39,7 @@ export class Minimap {
     const g = bg.getContext('2d');
     g.fillStyle = '#233322';
     g.fillRect(0, 0, bg.width, bg.height);
-    const boxes = [...this.map.boxes].sort((a, b) => a.y1 - b.y1);
+    const boxes = this.map.boxes.filter((b) => b.y0 < 6).sort((a, b) => a.y1 - b.y1); // sans le plafond des cartes intérieures
     for (const b of boxes) {
       const x = this.X(b.x0), y = this.Z(b.z0), w = (b.x1 - b.x0) * this.s, h = (b.z1 - b.z0) * this.s;
       g.fillStyle = BOX_COLORS[b.c] || '#666';

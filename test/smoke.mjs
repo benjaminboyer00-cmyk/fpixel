@@ -5,7 +5,8 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import WebSocket from 'ws';
 import { WEAPONS, GUN_ORDER, KNIFE, W, CLASSES, CUSTOM_BUDGET, weaponCost, resolveClass } from '../web/shared/config.js';
-import { newBotAI } from '../server/bots.js';
+import { newBotAI, findPath, botClass } from '../server/bots.js';
+import { MAPS } from '../web/shared/map.js';
 
 const PORT = 7861;
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -111,6 +112,8 @@ async function main() {
   for (let i = 0; i < 6; i++) { A.fire(0, [-15, 1.0, -25], [0, 0, 1], { seed: i }); await sleep(120); }
   const end = await A.waitFor('state', (m) => m.s === 'ended', 4000);
   check('fin de manche à la limite de frags', end.win && end.win.id === wA.id, JSON.stringify(end));
+  const rowA = end.stats?.rows.find((r) => r[0] === wA.id);
+  check('fin de manche : statistiques (frags, dégâts, précision) et MVP', !!rowA && rowA[1] >= 2 && rowA[3] >= 100 && rowA[4] > 0 && end.stats.mvp === wA.id, JSON.stringify(end.stats));
   const again = await A.waitFor('state', (m) => m.s === 'playing' && A.log.indexOf(m) > A.log.indexOf(end), 12000);
   check('nouvelle manche après l\'écran de fin', !!again);
   A.ws.close(); B.ws.close();
@@ -217,6 +220,34 @@ async function main() {
     check('difficulté : réaction facile > normal > difficile', easy.reaction > norm.reaction && norm.reaction > hard.reaction, `${easy.reaction | 0} / ${norm.reaction | 0} / ${hard.reaction | 0} ms`);
     check('difficulté : précision facile < normal < difficile (erreur de visée)', easy.err > norm.err && norm.err > hard.err, `${easy.err.toFixed(3)} / ${norm.err.toFixed(3)} / ${hard.err.toFixed(3)}`);
     check('difficulté inconnue = normal', newBotAI('nimporte').diff === 'nimporte' && newBotAI('nimporte').maxTurn > 0);
+
+    // pathfinding des bots : chaque carte, des apparitions vers l'intérieur des bâtiments, sans jamais traverser un mur
+    for (const m of Object.values(MAPS)) {
+      const goals = m.interiors.length ? m.interiors.map((r) => ({ x: (r.x0 + r.x1) / 2 + 1, z: (r.z0 + r.z1) / 2 + 1.5 })) : [{ x: 0, z: 2.6 }];
+      let bad = 0, none = 0;
+      for (const sp of [m.spawns[0], m.spawns[m.spawns.length - 1]]) {
+        for (const gl of goals) {
+          const path = findPath(m, sp.x, sp.z, gl.x, gl.z);
+          if (!path) { none++; continue; }
+          let px = sp.x, pz = sp.z;
+          for (const q of path) {
+            for (let k = 1; k <= 20; k++) {
+              const x = px + ((q.x - px) * k) / 20, z = pz + ((q.z - pz) * k) / 20;
+              if (m.boxes.some((b) => b.y0 < 1.8 && b.y1 > 0.6 && x > b.x0 && x < b.x1 && z > b.z0 && z < b.z1)) bad++;
+            }
+            px = q.x; pz = q.z;
+          }
+        }
+      }
+      check(`bots [${m.id}] : chemins trouvés vers l'intérieur des bâtiments, sans traverser de mur`, none === 0 && bad === 0, `sans chemin=${none} points dans un mur=${bad}`);
+    }
+    const ez = new Set(Array.from({ length: 200 }, () => botClass('easy').id)), hz = new Set(Array.from({ length: 300 }, () => botClass('hard').id));
+    check('bots : faciles en classique, difficiles avec toutes les classes', ez.size === 1 && ez.has('classic') && hz.size === Object.keys(CLASSES).length, `${[...hz]}`);
+
+    const wh = new Bot('WhA'); await wh.connect(); wh.join('ffa', 'whroom', 0, { map: 'warehouse' });
+    const wwh = await wh.waitFor('welcome');
+    check('3e carte : Entrepôt choisie à la création du salon', wwh.room.map === 'warehouse', JSON.stringify(wwh.room));
+    wh.ws.close();
 
     const a = new Bot('OptA'); await a.connect(); a.join('ffa', 'optA', 0, { limit: 3 });
     const wa = await a.waitFor('welcome');
@@ -503,6 +534,37 @@ async function main() {
       const hpA = sn.find((e) => e[0] === A.id)?.[6], hpV = sn.find((e) => e[0] === V2.id)?.[6];
       check('gaz : les autres perdent des PV, le lanceur (masque) non', hpA === 100 && hpV < 95 && hpV > 0, `A=${hpA} V=${hpV}`);
       await closeAll(A, V2, V3);
+    }
+    // --- fusil à pompe : à bout portant, un coup suffit ---
+    {
+      const A = await mk('Sg-A', [W.SHOTGUN]), B = await mk('Sg-B', [W.KNIFE]);
+      await sleep(450);
+      A.at(-15, -25, Math.PI, W.SHOTGUN); B.at(-15, -22, Math.PI); await sleep(300);
+      A.fire(W.SHOTGUN, [-15, 1.0, -25], [0, 0, 1], { seed: 3 });
+      await sleep(400);
+      check('pompe : un seul tir à 3 m tue (9 plombs de 18)', B.has('kill', (m) => m.v === B.id));
+      await closeAll(A, B);
+    }
+    // --- grenade à main : 2 en réserve, rebondit, explose après 2,4 s ---
+    {
+      const A = await mk('Nd-A', [W.KNIFE]);
+      await sleep(450);
+      check('grenades : 2 en réserve à l\'apparition', A.log.find((m) => m.t === 'spawn')?.nades === 2);
+      A.at(-15, -25, Math.PI, W.KNIFE); await sleep(300);
+      for (let i = 0; i < 3; i++) { A.send({ t: 'nade', dx: 0, dy: 0.45, dz: 0.89 }); await sleep(900); }
+      check('grenades : la 3e est refusée (2 max)', A.count('proj', (m) => m.w === W.FRAG) === 2, String(A.count('proj', (m) => m.w === W.FRAG)));
+      check('grenades : le nombre restant est annoncé', A.log.filter((m) => m.t === 'nades').at(-1)?.n === 0);
+      const boom = await A.waitFor('boom', (m) => m.w === W.FRAG, 4000).catch(() => null);
+      check('grenade : explose (rayon 4,2)', !!boom && boom.r === 4.2, JSON.stringify(boom));
+      check('grenade : elle a rebondi avant d\'exploser', A.has('pbounce'));
+      await closeAll(A);
+      const S = await mk('Nd-S', [W.KNIFE]);
+      await sleep(450);
+      S.at(-15, -25, Math.PI, W.KNIFE); await sleep(300);
+      S.send({ t: 'nade', dx: 0, dy: -1, dz: 0 });
+      const d = await S.waitFor('dmg', (m) => m.a === S.id, 4500).catch(() => null);
+      check('grenade à ses pieds : dégâts sur soi (réduits) et projection', !!d && d.hp > 0 && d.hp < 80 && S.has('push'), JSON.stringify(d));
+      await closeAll(S);
     }
     // --- minigun : cadence très élevée ---
     {
