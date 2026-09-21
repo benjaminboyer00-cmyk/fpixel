@@ -49,6 +49,8 @@ input[type="text"]:focus { border-color: var(--accent); }
 .mode:hover { border-color: #46566b; }
 .mode.sel { border-color: var(--accent); background: #211c0d; box-shadow: inset 0 0 0 1px var(--accent); }
 
+.check { display: flex; align-items: center; gap: 8px; margin: 10px 0 0; font-size: 13px; color: var(--text); cursor: pointer; }
+.check input { width: 18px; height: 18px; accent-color: var(--accent); }
 .btn {
   display: block; width: 100%; margin-top: 8px; padding: 12px; font: inherit; font-size: 15px; font-weight: 700; color: var(--text);
   background: #232b37; border: 2px solid #3a4658; box-shadow: 3px 3px 0 #000; cursor: pointer; letter-spacing: 1px;
@@ -180,7 +182,7 @@ body.touch #ammo { font-size: 22px; }
   .status { margin-top: 2px; }
   .help { display: none; }
   .logo { order: 0; } .f-name { order: 1; } .f-room { order: 2; } .modes { order: 3; }
-  #play { order: 4; } #open-settings { order: 5; } .status { order: 6; }
+  .f-bots { order: 4; grid-column: 1 / -1; margin: 0; } #play { order: 5; } #open-settings { order: 6; } .status { order: 7; }
   .panel.small { display: block; width: min(320px, 100%); }
   .row { margin: 6px 0; }
   #settings .panel { display: block; }

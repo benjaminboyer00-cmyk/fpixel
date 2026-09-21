@@ -14,6 +14,7 @@ import {
 } from '../web/shared/config.js';
 import { BOXES, SPAWNS, HALF } from '../web/shared/map.js';
 import { rayAABB, applySpread, mulberry32, clamp } from '../web/shared/util.js';
+import { BOT_NAMES, newBotAI, botStep } from './bots.js';
 
 const PORT = Number(process.env.PORT) || 7860;
 const WEB_ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'web');
@@ -65,33 +66,41 @@ function lobbyInfo() {
   for (const m of Object.keys(MODES)) modes[m] = { players: 0, max: MODES[m].max, rooms: [] };
   let online = 0;
   for (const r of rooms.values()) {
-    modes[r.mode].players += r.players.size;
-    modes[r.mode].rooms.push({ id: r.name, n: r.players.size, max: r.cfg.max });
-    online += r.players.size;
+    const n = humanCount(r);
+    modes[r.mode].players += n;
+    modes[r.mode].rooms.push({ id: r.name, n, max: r.cfg.max, bots: r.bots });
+    online += n;
   }
   return { ok: true, online, modes };
 }
 
-function findRoom(mode, name) {
+function humanCount(room) {
+  let n = 0;
+  for (const p of room.players.values()) if (!p.bot) n++;
+  return n;
+}
+
+// La capacité ne compte que les humains : les bots cèdent leur place.
+function findRoom(mode, name, bots) {
   const cfg = MODES[mode];
   if (name) {
     const id = `${mode}:${name}`;
     let room = rooms.get(id);
-    if (!room) room = createRoom(id, mode, name);
-    return room.players.size >= cfg.max ? null : room;
+    if (!room) room = createRoom(id, mode, name, bots);
+    return humanCount(room) >= cfg.max ? null : room;
   }
   for (const r of rooms.values()) {
-    if (r.mode === mode && r.auto && r.players.size < cfg.max) return r;
+    if (r.mode === mode && r.auto && r.bots === bots && humanCount(r) < cfg.max) return r;
   }
   const n = nextAutoRoom++;
-  const room = createRoom(`${mode}#${n}`, mode, `salon ${n}`);
+  const room = createRoom(`${mode}#${n}`, mode, `salon ${n}`, bots);
   room.auto = true;
   return room;
 }
 
-function createRoom(id, mode, name) {
+function createRoom(id, mode, name, bots) {
   const room = {
-    id, mode, name, cfg: MODES[mode], auto: false,
+    id, mode, name, cfg: MODES[mode], auto: false, bots,
     killLimit: Number(process.env.KILL_LIMIT) || MODES[mode].killLimit,
     players: new Map(),
     state: mode === 'duel' ? 'waiting' : 'playing', // waiting (duel seul) | playing | ended
@@ -105,12 +114,12 @@ function createRoom(id, mode, name) {
 // ---------------------------------------------------------------- Envoi ----
 
 function send(p, obj) {
-  if (p.ws.readyState === 1) p.ws.send(JSON.stringify(obj));
+  if (p.ws && p.ws.readyState === 1) p.ws.send(JSON.stringify(obj));
 }
 function broadcast(room, obj, except = null) {
   const data = JSON.stringify(obj);
   for (const p of room.players.values()) {
-    if (p !== except && p.ws.readyState === 1) p.ws.send(data);
+    if (p !== except && p.ws && p.ws.readyState === 1) p.ws.send(data);
   }
 }
 const r2 = (v) => Math.round(v * 100) / 100;
@@ -125,28 +134,92 @@ function cleanRoom(s) {
 
 // ---------------------------------------------------------------- Joueurs ----
 
-function addPlayer(room, ws, name) {
-  const id = nextPlayerId++;
-  let team = null;
-  if (room.cfg.teams) {
-    let red = 0, blue = 0;
-    for (const q of room.players.values()) q.team === 'red' ? red++ : blue++;
-    team = red < blue ? 'red' : blue < red ? 'blue' : Math.random() < 0.5 ? 'red' : 'blue';
-  }
-  const p = {
-    id, ws, room, name: cleanName(name, id), team,
+function pickTeam(room) {
+  if (!room.cfg.teams) return null;
+  let red = 0, blue = 0;
+  for (const q of room.players.values()) q.team === 'red' ? red++ : blue++;
+  return red < blue ? 'red' : blue < red ? 'blue' : Math.random() < 0.5 ? 'red' : 'blue';
+}
+
+function newPlayer(room, id, ws, name, team) {
+  return {
+    id, ws, room, name, team,
+    bot: false, vx: 0, vy: 0, vz: 0, onGround: true,
     x: 0, y: 0, z: 0, yaw: 0, pitch: 0, weapon: 0,
     hp: 0, alive: false, k: 0, d: 0,
     respawnAt: 0, protectUntil: 0, lastDamage: 0, nextFire: 0,
     hist: [],
   };
+}
+
+function addPlayer(room, ws, name) {
+  const id = nextPlayerId++;
+  const p = newPlayer(room, id, ws, cleanName(name, id), pickTeam(room));
   room.players.set(id, p);
   ws.player = p;
   return p;
 }
 
+// ---- bots ----
+function addBot(room) {
+  const id = nextPlayerId++;
+  const used = new Set([...room.players.values()].map((q) => q.name));
+  const free = BOT_NAMES.filter((n) => !used.has(`Bot ${n}`));
+  const name = `Bot ${free.length ? free[(Math.random() * free.length) | 0] : id}`;
+  const b = newPlayer(room, id, null, name, pickTeam(room));
+  b.bot = true;
+  b.ai = newBotAI();
+  room.players.set(id, b);
+  broadcast(room, { t: 'pjoin', p: publicPlayer(b) });
+  spawnPlayer(room, b);
+}
+
+function dropPlayer(room, p) {
+  room.players.delete(p.id);
+  broadcast(room, { t: 'pleave', id: p.id });
+}
+
+// Ajuste le nombre de bots pour que la partie soit "pleine" (humains + bots = cfg.fill).
+// Retourne true si des bots ont été ajoutés ou retirés.
+function adjustBots(room) {
+  const humans = humanCount(room);
+  if (!humans) return false;
+  const want = room.bots ? Math.max(0, room.cfg.fill - humans) : 0;
+  let bots = [...room.players.values()].filter((p) => p.bot);
+  let changed = false;
+  while (bots.length > want) {
+    let pool = bots;
+    if (room.cfg.teams) { // on retire un bot de l'équipe la plus nombreuse
+      const count = { red: 0, blue: 0 };
+      for (const q of room.players.values()) count[q.team]++;
+      const big = count.red >= count.blue ? 'red' : 'blue';
+      const inBig = bots.filter((b) => b.team === big);
+      if (inBig.length) pool = inBig;
+    }
+    dropPlayer(room, pool[pool.length - 1]);
+    bots = [...room.players.values()].filter((p) => p.bot);
+    changed = true;
+  }
+  while (bots.length < want) { addBot(room); bots = [...room.players.values()].filter((p) => p.bot); changed = true; }
+  if (changed) broadcast(room, scoreMsg(room));
+  return changed;
+}
+
+// À appeler quand un humain arrive ou part. Retourne true si le match a été relancé.
+function afterRosterChange(room) {
+  const changed = adjustBots(room);
+  if (room.cfg.id === 'duel') {
+    if (room.players.size >= 2 && (changed || room.state === 'waiting')) { resetMatch(room); return true; }
+    if (room.players.size < 2 && room.state !== 'waiting') {
+      room.state = 'waiting';
+      broadcast(room, { t: 'state', s: 'waiting', win: null });
+    }
+  }
+  return false;
+}
+
 function publicPlayer(p) {
-  return { id: p.id, name: p.name, team: p.team, k: p.k, d: p.d, hp: p.hp, w: p.weapon };
+  return { id: p.id, name: p.name, team: p.team, k: p.k, d: p.d, hp: p.hp, w: p.weapon, bot: !!p.bot };
 }
 
 function scoreMsg(room) {
@@ -173,6 +246,7 @@ function pickSpawn(room, p) {
 function spawnPlayer(room, p, now = Date.now()) {
   const s = pickSpawn(room, p);
   p.x = s.x; p.y = 0; p.z = s.z; p.yaw = s.yaw; p.pitch = 0;
+  p.vx = p.vy = p.vz = 0; p.onGround = true;
   p.hp = MAX_HP; p.alive = true;
   p.protectUntil = now + SPAWN_PROTECT_MS;
   p.lastDamage = 0; p.nextFire = 0;
@@ -195,13 +269,9 @@ function removePlayer(p) {
   const room = p.room;
   if (!room || !room.players.delete(p.id)) return;
   broadcast(room, { t: 'pleave', id: p.id });
-  if (!room.players.size) { rooms.delete(room.id); return; }
+  if (!humanCount(room)) { rooms.delete(room.id); return; } // plus d'humains : on ferme (les bots partent avec)
   broadcast(room, scoreMsg(room));
-  if (room.cfg.id === 'duel' && room.players.size < 2 && room.state !== 'waiting') {
-    // L'adversaire est parti : le survivant attend un nouvel adversaire.
-    room.state = 'waiting';
-    broadcast(room, { t: 'state', s: 'waiting', win: null });
-  }
+  afterRosterChange(room);
 }
 
 // ---------------------------------------------------------------- Tirs ----
@@ -358,7 +428,8 @@ function handleMessage(ws, raw) {
   if (m.t === 'join') {
     if (ws.player) return;
     const mode = MODES[m.mode] ? m.mode : 'ffa';
-    const room = findRoom(mode, cleanRoom(m.room));
+    const bots = m.bots === undefined ? true : !!m.bots;
+    const room = findRoom(mode, cleanRoom(m.room), bots);
     if (!room) return ws.send(JSON.stringify({ t: 'error', msg: 'Ce salon est complet.' }));
     const p = addPlayer(room, ws, m.name);
     send(p, {
@@ -369,9 +440,8 @@ function handleMessage(ws, raw) {
       teamKills: room.teamKills,
     });
     broadcast(room, { t: 'pjoin', p: publicPlayer(p) }, p);
-    if (room.cfg.id === 'duel' && room.players.size >= 2 && room.state === 'waiting') {
-      resetMatch(room); // le 2e joueur est arrivé : le duel démarre, scores remis à zéro
-    } else {
+    // bots ajoutés/retirés ; en duel le match (re)démarre quand il y a deux joueurs
+    if (!afterRosterChange(room)) {
       spawnPlayer(room, p, now);
       broadcast(room, scoreMsg(room));
     }
@@ -408,6 +478,10 @@ setInterval(() => {
       if (!p.alive && p.respawnAt && now >= p.respawnAt && room.state !== 'ended') {
         p.respawnAt = 0;
         spawnPlayer(room, p, now);
+      }
+      if (p.bot && p.alive && room.state === 'playing') {
+        const f = botStep(room, p, now, TICK_MS / 1000);
+        if (f) handleFire(p, f, now);
       }
       if (p.alive) {
         if (p.hp < MAX_HP && now - p.lastDamage > REGEN_DELAY_MS) p.hp = Math.min(MAX_HP, p.hp + REGEN_PER_S * (TICK_MS / 1000));

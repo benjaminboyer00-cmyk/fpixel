@@ -5,6 +5,8 @@ import { isTouch } from './config.js';
 const LOOK_MOUSE = 0.0022; // rad par pixel
 const LOOK_TOUCH = 0.0042;
 const STICK_R = 55;
+const KEY_LOOK = 2.4;      // rad/s : viser avec les flèches (portable sans souris)
+const FIRE_KEYS = ['KeyF', 'Enter', 'NumpadEnter', 'ControlRight']; // tirer au clavier
 
 export class Input {
   constructor(canvas) {
@@ -12,7 +14,7 @@ export class Input {
     this.enabled = false;        // mis à true par le jeu quand une partie tourne et n'est pas en pause
     this.locked = false;         // pointer lock (PC)
     this.keys = new Set();
-    this.fireHeld = false;
+    this.fireSrc = { mouse: false, key: false, touch: false }; // plusieurs sources : clic, clavier, bouton tactile
     this.scopeHeld = false;
     this.jumpHeld = false;
     this.scoreHeld = false;
@@ -31,17 +33,23 @@ export class Input {
   }
 
   get active() { return this.enabled && (isTouch || this.locked); }
+  get fireHeld() { const f = this.fireSrc; return f.mouse || f.key || f.touch; }
 
   get moveX() {
     if (isTouch) return this.stick.x;
-    return (this.keys.has('KeyD') || this.keys.has('ArrowRight') ? 1 : 0) - (this.keys.has('KeyA') || this.keys.has('ArrowLeft') ? 1 : 0);
+    return (this.keys.has('KeyD') ? 1 : 0) - (this.keys.has('KeyA') ? 1 : 0);
   }
   get moveY() {
     if (isTouch) return this.stick.y;
-    return (this.keys.has('KeyW') || this.keys.has('ArrowUp') ? 1 : 0) - (this.keys.has('KeyS') || this.keys.has('ArrowDown') ? 1 : 0);
+    return (this.keys.has('KeyW') ? 1 : 0) - (this.keys.has('KeyS') ? 1 : 0);
   }
 
-  takeLook() {
+  takeLook(dt = 0) {
+    if (dt && !isTouch) { // flèches : viser au clavier
+      const k = this.keys;
+      this._lookX += ((k.has('ArrowRight') ? 1 : 0) - (k.has('ArrowLeft') ? 1 : 0)) * KEY_LOOK * dt;
+      this._lookY += ((k.has('ArrowDown') ? 1 : 0) - (k.has('ArrowUp') ? 1 : 0)) * KEY_LOOK * dt;
+    }
     const r = [this._lookX, this._lookY];
     this._lookX = this._lookY = 0;
     return this.active ? r : [0, 0];
@@ -58,7 +66,8 @@ export class Input {
 
   reset() {
     this.keys.clear();
-    this.fireHeld = this.scopeHeld = this.jumpHeld = this.scoreHeld = false;
+    this.fireSrc.mouse = this.fireSrc.key = this.fireSrc.touch = false;
+    this.scopeHeld = this.jumpHeld = this.scoreHeld = false;
     this.stick.x = this.stick.y = 0;
     this._lookX = this._lookY = 0;
     this._reload = false; this._weapon = null; this._cycle = 0; this._scopeToggle = false;
@@ -88,6 +97,12 @@ export class Input {
       if (c === 'Tab') { e.preventDefault(); this.scoreHeld = true; return; }
       if (c === 'Space') { e.preventDefault(); this.jumpHeld = true; return; }
       if (c === 'KeyR') { this._reload = true; return; }
+      if (FIRE_KEYS.includes(c)) {
+        e.preventDefault();
+        if (!this.fireSrc.key) this._firePressAt = performance.now();
+        this.fireSrc.key = true;
+        return;
+      }
       const m = /^(?:Digit|Numpad)([1-5])$/.exec(c);
       if (m) { this._weapon = Number(m[1]) - 1; return; }
       if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(c)) {
@@ -97,6 +112,7 @@ export class Input {
     });
     document.addEventListener('keyup', (e) => {
       this.keys.delete(e.code);
+      if (FIRE_KEYS.includes(e.code)) this.fireSrc.key = false;
       if (e.code === 'Space') this.jumpHeld = false;
       if (e.code === 'Tab') { this.scoreHeld = false; e.preventDefault(); }
     });
@@ -104,11 +120,11 @@ export class Input {
 
     document.addEventListener('mousedown', (e) => {
       if (!this.active) return;
-      if (e.button === 0) { this.fireHeld = true; this._firePressAt = performance.now(); }
+      if (e.button === 0) { this.fireSrc.mouse = true; this._firePressAt = performance.now(); }
       if (e.button === 2) this.scopeHeld = true;
     });
     document.addEventListener('mouseup', (e) => {
-      if (e.button === 0) this.fireHeld = false;
+      if (e.button === 0) this.fireSrc.mouse = false;
       if (e.button === 2) this.scopeHeld = false;
     });
     document.addEventListener('mousemove', (e) => {
@@ -133,7 +149,7 @@ export class Input {
 
     const press = (act, on, arg) => {
       switch (act) {
-        case 'fire': this.fireHeld = on; if (on) this._firePressAt = performance.now(); break;
+        case 'fire': this.fireSrc.touch = on; if (on) this._firePressAt = performance.now(); break;
         case 'jump': this.jumpHeld = on; break;
         case 'score': this.scoreHeld = on; break;
         case 'reload': if (on) this._reload = true; break;

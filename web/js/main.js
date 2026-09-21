@@ -32,6 +32,8 @@ function selectMode(m) {
 document.querySelectorAll('.mode').forEach((b) => b.addEventListener('click', () => selectMode(b.dataset.mode)));
 selectMode(settings.mode);
 
+$('bots').checked = settings.bots !== false;
+$('bots').addEventListener('change', () => { settings.bots = $('bots').checked; saveSettings(settings); });
 $('name').addEventListener('input', () => { settings.name = $('name').value; saveSettings(settings); });
 $('room').addEventListener('input', () => { settings.room = $('room').value; saveSettings(settings); });
 $('name').addEventListener('keydown', (e) => { if (e.key === 'Enter') play(); });
@@ -118,7 +120,7 @@ async function play() {
   } catch (e) {
     return showMenu(`Connexion impossible (${SERVER_HOST}).`);
   }
-  net.send({ t: 'join', name, mode: settings.mode, room: settings.room.trim() });
+  net.send({ t: 'join', name, mode: settings.mode, room: settings.room.trim(), bots: settings.bots ? 1 : 0 });
 }
 $('play').addEventListener('click', play);
 
@@ -185,6 +187,8 @@ for (const [id, out, key, fmt] of SLIDERS) {
     game?.applySettings();
   });
 }
+$('s-auto').checked = !!settings.autoFire;
+$('s-auto').addEventListener('change', () => { settings.autoFire = $('s-auto').checked; saveSettings(settings); });
 $('s-inv').checked = !!settings.invertY;
 $('s-inv').addEventListener('change', () => { settings.invertY = $('s-inv').checked; saveSettings(settings); });
 

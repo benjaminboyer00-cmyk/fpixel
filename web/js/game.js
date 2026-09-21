@@ -155,7 +155,7 @@ export class Game {
     model.group.visible = false;
     this.scene.add(model.group);
     p = {
-      id: info.id, name: info.name, team: info.team, k: info.k || 0, d: info.d || 0,
+      id: info.id, name: info.name, team: info.team, bot: !!info.bot, k: info.k || 0, d: info.d || 0,
       hp: info.hp ?? 0, weapon: info.w ?? 0, prot: 0, snaps: [], model, sprite: null, lastX: 0, lastZ: 0, walk: 0,
     };
     // Nom au-dessus de la tête : seulement les coéquipiers en mode équipes (pas de "wallhack")
@@ -182,12 +182,12 @@ export class Game {
     n.on('pjoin', (m) => {
       const p = this._addPlayer(m.p);
       this.scoreDirty = true;
-      this.hud.sysMessage(`${p.name} a rejoint`);
+      if (!p.bot) this.hud.sysMessage(`${p.name} a rejoint`);
     });
     n.on('pleave', (m) => {
       const p = this.players.get(m.id);
       if (!p) return;
-      this.hud.sysMessage(`${p.name} est parti`);
+      if (!p.bot) this.hud.sysMessage(`${p.name} est parti`);
       this._removeModel(p);
       this.players.delete(m.id);
       this.scoreDirty = true;
@@ -339,7 +339,7 @@ export class Game {
     const w = WEAPONS[me.weapon];
 
     // --- caméra (souris / doigt) ---
-    const [lx, ly] = inp.takeLook();
+    const [lx, ly] = inp.takeLook(dt);
     if (lx || ly) {
       const ratio = this.fov / this.baseVFov();
       const k = s.sens * ratio * (me.scoped ? s.sensScope : 1);
@@ -370,8 +370,10 @@ export class Game {
       if (!w.zoom) me.scopeToggle = false;
 
       // --- tir ---
+      // tir maintenu pour toutes les armes (cadence de l'arme) ; tir auto si un ennemi est dans le viseur
       const pressed = inp.takeFirePress(now);
-      const firing = w.auto ? inp.fireHeld || pressed : pressed;
+      let firing = inp.fireHeld || pressed;
+      if (!firing && s.autoFire && this._enemyInCrosshair(w, me)) firing = true;
       if (firing) this._tryFire(now);
     } else {
       me.scoped = false;
@@ -405,6 +407,28 @@ export class Game {
       }
     }
     me.speed2d = Math.hypot(me.vx, me.vz);
+  }
+
+  // Un ennemi vivant, sans mur devant, est-il pile sous le viseur ? (tir automatique)
+  _enemyInCrosshair(w, me) {
+    if (w.zoom && !me.scoped) return false;
+    const ex = me.x, ey = me.y + EYE_HEIGHT, ez = me.z;
+    const [dx, dy, dz] = lookDir(me.yaw, me.pitch);
+    let reach = w.melee ? w.range : 80;
+    for (const b of BOXES) {
+      const h = rayAABB(ex, ey, ez, dx, dy, dz, b.x0, b.y0, b.z0, b.x1, b.y1, b.z1, reach);
+      if (h >= 0 && h < reach) reach = h;
+    }
+    const pad = 0.12;
+    for (const p of this.players.values()) {
+      if (p.id === this.myId || p.hp <= 0 || p.prot || !p.snaps.length) continue;
+      if (this.mode === 'tdm' && p.team === this.myTeam()) continue;
+      const g = p.model.group.position;
+      const body = rayAABB(ex, ey, ez, dx, dy, dz, g.x - 0.35 - pad, g.y, g.z - 0.35 - pad, g.x + 0.35 + pad, g.y + 1.4, g.z + 0.35 + pad, reach);
+      const head = rayAABB(ex, ey, ez, dx, dy, dz, g.x - 0.25 - pad, g.y + 1.4, g.z - 0.25 - pad, g.x + 0.25 + pad, g.y + 1.85, g.z + 0.25 + pad, reach);
+      if (body >= 0 || head >= 0) return true;
+    }
+    return false;
   }
 
   _switchTo(i, now) {

@@ -65,13 +65,15 @@
         <input id="room" type="text" maxlength="12" placeholder="ex : potes" autocomplete="off" spellcheck="false">
       </label>
 
+      <label class="check f-bots"><input id="bots" type="checkbox"> Compléter la partie avec des bots</label>
+
       <button id="play" class="btn primary">JOUER</button>
       <button id="open-settings" class="btn">Réglages (sensibilité…)</button>
       <div id="status" class="status"><i></i><span>Connexion au serveur…</span></div>
 
       <details class="help">
         <summary>Contrôles</summary>
-        <p class="desktop-only"><b>ZQSD / WASD</b> bouger · <b>Souris</b> viser · <b>Clic gauche</b> tirer · <b>Clic droit</b> zoom sniper · <b>Espace</b> sauter · <b>R</b> recharger · <b>1-5 / molette</b> armes · <b>Tab</b> scores · <b>Échap</b> pause</p>
+        <p class="desktop-only"><b>ZQSD / WASD</b> bouger · <b>Souris</b> viser · <b>Clic gauche</b> (ou <b>F</b> / <b>Entrée</b>) tirer · <b>Clic droit</b> zoom sniper · <b>Espace</b> sauter · <b>R</b> recharger · <b>1-5 / molette</b> armes · <b>Tab</b> scores · <b>Échap</b> pause<br>Portable sans souris : <b>flèches</b> pour viser + <b>F</b> pour tirer, ou active le tir automatique dans les réglages.</p>
         <p class="touch-only"><b>Joystick gauche</b> bouger · <b>Glisser à droite</b> viser · <b>FEU</b> tirer (glisse dessus pour viser en tirant) · <b>ZOOM</b> pour le sniper</p>
       </details>
     </div>
@@ -96,6 +98,7 @@
       <div class="row"><label for="s-fov">Champ de vision (horizontal)</label><input id="s-fov" type="range" min="70" max="120" step="1"><output id="o-fov"></output></div>
       <div class="row"><label for="s-scale">Qualité (résolution)</label><input id="s-scale" type="range" min="0.3" max="1" step="0.05"><output id="o-scale"></output></div>
       <div class="row"><label for="s-vol">Volume</label><input id="s-vol" type="range" min="0" max="1" step="0.05"><output id="o-vol"></output></div>
+      <div class="row"><label for="s-auto">Tir automatique (ennemi dans le viseur)</label><input id="s-auto" type="checkbox"></div>
       <div class="row"><label for="s-inv">Inverser l'axe vertical</label><input id="s-inv" type="checkbox"></div>
       <button id="close-settings" class="btn primary">OK</button>
     </div>

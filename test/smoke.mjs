@@ -30,7 +30,7 @@ class Bot {
     await new Promise((r) => this.ws.on('open', r));
   }
   send(o) { this.ws.send(JSON.stringify(o)); }
-  join(mode, room) { this.send({ t: 'join', name: this.name, mode, room }); }
+  join(mode, room, bots = 0) { this.send({ t: 'join', name: this.name, mode, room, bots }); }
   waitFor(type, pred, ms = 5000) {
     const old = this.log.find((m) => m.t === type && (!pred || pred(m)));
     if (old) return Promise.resolve(old);
@@ -47,6 +47,7 @@ class Bot {
       await sleep(50);
     }
   }
+  count(type, pred) { return this.log.filter((m) => m.t === type && (!pred || pred(m))).length; }
   has(type, pred) { return this.log.some((m) => m.t === type && (!pred || pred(m))); }
   pos(x, y, z, yaw = 0, w = 0) { this.send({ t: 'in', x, y, z, yaw, pitch: 0, w }); }
   fire(w, o, d, extra = {}) { this.send({ t: 'fire', w, ox: o[0], oy: o[1], oz: o[2], dx: d[0], dy: d[1], dz: d[2], seed: 1, rt: Date.now(), ...extra }); }
@@ -134,8 +135,77 @@ async function main() {
   T.forEach((b) => b.ws.close());
   await sleep(200);
 
+  // ---------- BOTS ----------
+  console.log('\n[bots]');
+  {
+    const H = new Bot('Solo');
+    await H.connect(); H.join('duel', 'botduel', 1);
+    const w = await H.waitFor('welcome');
+    await sleep(500);
+    check('duel en solo : un bot arrive tout de suite', H.has('pjoin', (m) => m.p.bot), JSON.stringify(H.log.map((m) => m.t)));
+    check('duel en solo : le match démarre (pas d\'attente)', !H.has('state', (m) => m.s === 'waiting') || H.has('state', (m) => m.s === 'playing'));
+    const H2 = new Bot('Pote');
+    await H2.connect(); H2.join('duel', 'botduel', 1);
+    const w2 = await H2.waitFor('welcome');
+    check('un 2e humain peut rejoindre (les bots ne comptent pas dans la capacité)', !!w2 && w2.room.id === w.room.id);
+    await sleep(500);
+    check('le bot part quand le 2e humain arrive', H.has('pleave'), JSON.stringify(H.log.map((m) => m.t)));
+    check('en duel humain contre humain, il ne reste aucun bot', w2.players.filter((p) => p.bot).length <= 1);
+    H2.ws.close();
+    await sleep(500);
+    check('le 2e humain part : un bot revient', H.count('pjoin', (m) => m.p.bot) >= 2);
+    H.ws.close();
+
+    const F = new Bot('Ffa');
+    await F.connect(); F.join('ffa', 'botffa', 1);
+    await F.waitFor('welcome');
+    await sleep(600);
+    check('FFA : complété à 6 joueurs (1 humain + 5 bots)', F.count('pjoin', (m) => m.p.bot) === 5, `bots=${F.count('pjoin', (m) => m.p.bot)}`);
+
+    // Les bots bougent
+    F.pos(0, 0, -20, 0, 0);
+    await sleep(400);
+    const snapA = F.lastSnap;
+    await sleep(2500);
+    const snapB = F.lastSnap;
+    const botIds = F.log.filter((m) => m.t === 'pjoin' && m.p.bot).map((m) => m.p.id);
+    const moved = botIds.filter((id) => {
+      const a = snapA.p.find((r) => r[0] === id), b = snapB.p.find((r) => r[0] === id);
+      return a && b && Math.hypot(a[1] - b[1], a[3] - b[3]) > 1;
+    });
+    check('les bots se déplacent', moved.length >= 2, `${moved.length}/5 ont bougé`);
+
+    // Les bots tirent sur un humain immobile (après la protection d'apparition)
+    let dmg = null;
+    const t0 = Date.now();
+    while (Date.now() - t0 < 30000 && !(dmg = F.log.find((m) => m.t === 'dmg' || (m.t === 'kill' && m.v === (F.log.find((x) => x.t === 'welcome').id))))) {
+      F.pos(0, 0, -20, 0, 0); // il reste debout au milieu, sans bouger
+      await sleep(100);
+    }
+    check('un bot finit par toucher un humain immobile', !!dmg, 'aucun dégât en 30 s');
+    check('les bots se tirent aussi dessus / marquent des frags', F.count('score') > 1);
+    F.ws.close();
+
+    const TT = new Bot('Team');
+    await TT.connect(); TT.join('tdm', 'bottdm', 1);
+    const wt = await TT.waitFor('welcome');
+    await sleep(600);
+    const all = [...wt.players, ...TT.log.filter((m) => m.t === 'pjoin').map((m) => m.p)];
+    const red = all.filter((p) => p.team === 'red').length, blue = all.filter((p) => p.team === 'blue').length;
+    check('équipes : complétées à 8, équilibrées 4v4', red === 4 && blue === 4, `rouge=${red} bleu=${blue}`);
+    TT.ws.close();
+
+    const N = new Bot('SansBot');
+    await N.connect(); N.join('duel', 'nobots', 0);
+    await N.waitFor('welcome');
+    await sleep(400);
+    check('bots désactivés : le duel attend un vrai adversaire', !N.has('pjoin') && N.log.find((m) => m.t === 'welcome').state === 'waiting');
+    N.ws.close();
+  }
+  await sleep(300);
+
   const lobby = await (await fetch(`http://localhost:${PORT}/api/rooms`)).json();
-  check('salons vides supprimés', lobby.online === 0, JSON.stringify(lobby));
+  check('salons vides supprimés', lobby.online === 0 && Object.values(lobby.modes).every((m) => m.rooms.length === 0), JSON.stringify(lobby));
 }
 
 main().catch((e) => { console.error('ERREUR', e); failed++; }).finally(() => {

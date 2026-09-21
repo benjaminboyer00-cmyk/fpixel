@@ -16,6 +16,12 @@ Petit FPS low-poly en ligne, pensé pour ~10 joueurs, sur PC (clavier/souris) et
 **Modes** : 1v1 (10 frags) · Match à mort par équipe (Rouge/Bleu, 30 frags) · Chacun pour soi (20 frags)
 **Armes** (touches 1-5 ou molette) : fusil d'assaut, fusil à pompe, sniper (clic droit = zoom), revolver, couteau (dans le dos = mort instantanée)
 
+**Bots** : le serveur complète les parties (1v1 : 1 bot en solo · équipes : 4v4 · chacun pour soi : 6 joueurs). Ils cèdent leur place dès qu'un humain arrive
+et jouent avec les mêmes règles (mêmes armes, mêmes dégâts, murs qui bloquent). Case « Compléter avec des bots » dans le menu pour les désactiver.
+
+**Contrôles PC** : ZQSD/WASD bouger · souris viser · clic gauche **ou F / Entrée** tirer (maintenu = tir en continu) · clic droit zoom sniper · Espace sauter · R recharger · Tab scores.
+**Portable sans souris** : le pavé tactile ignore les clics tant qu'une touche est enfoncée (« désactiver pendant la frappe ») → viser avec les **flèches**, tirer avec **F**, ou activer le **tir automatique** dans les réglages.
+
 ## Architecture
 
 | Partie | Où | Rôle |
@@ -36,7 +42,7 @@ Le serveur sert aussi le client : `https://benji4565-fpixel.hf.space` est jouabl
 ```bash
 npm install
 npm run dev          # http://localhost:7860 (serveur + client)
-node test/smoke.mjs  # bots WebSocket : duel, mur, headshot, équipes, fin de manche
+node test/smoke.mjs  # bots WebSocket : duel, mur, headshot, équipes, fin de manche, IA des bots
 node test/physics.mjs
 ```
 

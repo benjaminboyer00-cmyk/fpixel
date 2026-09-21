@@ -28,9 +28,9 @@ export const HEAD_HALF = 0.25;
 export const HEAD_TOP = 1.85;
 
 export const MODES = {
-  duel: { id: 'duel', label: '1v1', desc: 'Duel, premier à 10 frags', max: 2, killLimit: 10, teams: false },
-  tdm: { id: 'tdm', label: 'Match à mort par équipe', desc: 'Rouge contre Bleu, 30 frags', max: 10, killLimit: 30, teams: true },
-  ffa: { id: 'ffa', label: 'Chacun pour soi', desc: 'Tous contre tous, 20 frags', max: 10, killLimit: 20, teams: false },
+  duel: { id: 'duel', label: '1v1', desc: 'Duel, premier à 10 frags', max: 2, fill: 2, killLimit: 10, teams: false },
+  tdm: { id: 'tdm', label: 'Match à mort par équipe', desc: 'Rouge contre Bleu, 30 frags', max: 10, fill: 8, killLimit: 30, teams: true },
+  ffa: { id: 'ffa', label: 'Chacun pour soi', desc: 'Tous contre tous, 20 frags', max: 10, fill: 6, killLimit: 20, teams: false },
 };
 
 // Index = touche du clavier (1..5). "range" = portée max en mètres (mêlée uniquement).
