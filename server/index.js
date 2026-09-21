@@ -1,0 +1,450 @@
+// Serveur FPIXEL : WebSocket (salons + logique de jeu) + fichiers statiques du client.
+// Tourne sur un Space Hugging Face (Docker, port 7860) ou en local : `npm run dev`.
+
+import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { WebSocketServer } from 'ws';
+
+import {
+  TICK_MS, REWIND_MAX_MS, MAX_RAY, EYE_HEIGHT, MAX_HP, RESPAWN_MS, SPAWN_PROTECT_MS,
+  REGEN_DELAY_MS, REGEN_PER_S, END_SCREEN_MS, BODY_HALF, BODY_TOP, HEAD_HALF, HEAD_TOP,
+  MODES, WEAPONS,
+} from '../web/shared/config.js';
+import { BOXES, SPAWNS, HALF } from '../web/shared/map.js';
+import { rayAABB, applySpread, mulberry32, clamp } from '../web/shared/util.js';
+
+const PORT = Number(process.env.PORT) || 7860;
+const WEB_ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'web');
+
+// ---------------------------------------------------------------- HTTP ----
+
+const MIME = {
+  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.png': 'image/png', '.svg': 'image/svg+xml',
+  '.ico': 'image/x-icon', '.txt': 'text/plain; charset=utf-8', '.map': 'application/json',
+};
+
+function sendJson(res, obj) {
+  res.writeHead(200, {
+    'Content-Type': 'application/json',
+    'Access-Control-Allow-Origin': '*',
+    'Cache-Control': 'no-store',
+  });
+  res.end(JSON.stringify(obj));
+}
+
+const httpServer = http.createServer((req, res) => {
+  let pathname;
+  try { pathname = decodeURIComponent(new URL(req.url, 'http://x').pathname); } catch { pathname = '/'; }
+
+  if (pathname === '/health' || pathname === '/api/rooms') return sendJson(res, lobbyInfo());
+
+  if (pathname.endsWith('/')) pathname += 'index.html';
+  const file = path.normalize(path.join(WEB_ROOT, pathname));
+  if (!file.startsWith(WEB_ROOT + path.sep)) { res.writeHead(403); return res.end('403'); }
+  fs.readFile(file, (err, data) => {
+    if (err) { res.writeHead(404, { 'Content-Type': 'text/plain' }); return res.end('404'); }
+    res.writeHead(200, {
+      'Content-Type': MIME[path.extname(file)] || 'application/octet-stream',
+      'Cache-Control': 'no-cache',
+    });
+    res.end(data);
+  });
+});
+
+// ---------------------------------------------------------------- Salons ----
+
+const rooms = new Map(); // id -> room
+let nextPlayerId = 1;
+let nextAutoRoom = 1;
+
+function lobbyInfo() {
+  const modes = {};
+  for (const m of Object.keys(MODES)) modes[m] = { players: 0, max: MODES[m].max, rooms: [] };
+  let online = 0;
+  for (const r of rooms.values()) {
+    modes[r.mode].players += r.players.size;
+    modes[r.mode].rooms.push({ id: r.name, n: r.players.size, max: r.cfg.max });
+    online += r.players.size;
+  }
+  return { ok: true, online, modes };
+}
+
+function findRoom(mode, name) {
+  const cfg = MODES[mode];
+  if (name) {
+    const id = `${mode}:${name}`;
+    let room = rooms.get(id);
+    if (!room) room = createRoom(id, mode, name);
+    return room.players.size >= cfg.max ? null : room;
+  }
+  for (const r of rooms.values()) {
+    if (r.mode === mode && r.auto && r.players.size < cfg.max) return r;
+  }
+  const n = nextAutoRoom++;
+  const room = createRoom(`${mode}#${n}`, mode, `salon ${n}`);
+  room.auto = true;
+  return room;
+}
+
+function createRoom(id, mode, name) {
+  const room = {
+    id, mode, name, cfg: MODES[mode], auto: false,
+    killLimit: Number(process.env.KILL_LIMIT) || MODES[mode].killLimit,
+    players: new Map(),
+    state: mode === 'duel' ? 'waiting' : 'playing', // waiting (duel seul) | playing | ended
+    teamKills: { red: 0, blue: 0 },
+    endAt: 0, winner: null,
+  };
+  rooms.set(id, room);
+  return room;
+}
+
+// ---------------------------------------------------------------- Envoi ----
+
+function send(p, obj) {
+  if (p.ws.readyState === 1) p.ws.send(JSON.stringify(obj));
+}
+function broadcast(room, obj, except = null) {
+  const data = JSON.stringify(obj);
+  for (const p of room.players.values()) {
+    if (p !== except && p.ws.readyState === 1) p.ws.send(data);
+  }
+}
+const r2 = (v) => Math.round(v * 100) / 100;
+
+function cleanName(s, id) {
+  const n = String(s || '').replace(/[^\p{L}\p{N} _\-.]/gu, '').trim().slice(0, 14);
+  return n || `Joueur${id}`;
+}
+function cleanRoom(s) {
+  return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 12);
+}
+
+// ---------------------------------------------------------------- Joueurs ----
+
+function addPlayer(room, ws, name) {
+  const id = nextPlayerId++;
+  let team = null;
+  if (room.cfg.teams) {
+    let red = 0, blue = 0;
+    for (const q of room.players.values()) q.team === 'red' ? red++ : blue++;
+    team = red < blue ? 'red' : blue < red ? 'blue' : Math.random() < 0.5 ? 'red' : 'blue';
+  }
+  const p = {
+    id, ws, room, name: cleanName(name, id), team,
+    x: 0, y: 0, z: 0, yaw: 0, pitch: 0, weapon: 0,
+    hp: 0, alive: false, k: 0, d: 0,
+    respawnAt: 0, protectUntil: 0, lastDamage: 0, nextFire: 0,
+    hist: [],
+  };
+  room.players.set(id, p);
+  ws.player = p;
+  return p;
+}
+
+function publicPlayer(p) {
+  return { id: p.id, name: p.name, team: p.team, k: p.k, d: p.d, hp: p.hp, w: p.weapon };
+}
+
+function scoreMsg(room) {
+  return {
+    t: 'score',
+    p: [...room.players.values()].map((p) => [p.id, p.k, p.d]),
+    team: room.teamKills,
+  };
+}
+
+function pickSpawn(room, p) {
+  const enemies = [...room.players.values()].filter((q) => q !== p && q.alive && (!room.cfg.teams || q.team !== p.team));
+  let pool = SPAWNS.filter((s) => (room.cfg.teams ? s.team === p.team : true));
+  if (!pool.length) pool = SPAWNS;
+  const scored = pool.map((s) => {
+    let dmin = 1e9;
+    for (const q of enemies) dmin = Math.min(dmin, Math.hypot(q.x - s.x, q.z - s.z));
+    return { s, dmin: dmin + Math.random() * 6 }; // un peu d'aléatoire pour ne pas être prévisible
+  });
+  scored.sort((a, b) => b.dmin - a.dmin);
+  return scored[0].s;
+}
+
+function spawnPlayer(room, p, now = Date.now()) {
+  const s = pickSpawn(room, p);
+  p.x = s.x; p.y = 0; p.z = s.z; p.yaw = s.yaw; p.pitch = 0;
+  p.hp = MAX_HP; p.alive = true;
+  p.protectUntil = now + SPAWN_PROTECT_MS;
+  p.lastDamage = 0; p.nextFire = 0;
+  p.hist = [];
+  send(p, { t: 'spawn', x: s.x, y: 0, z: s.z, yaw: s.yaw, hp: MAX_HP });
+}
+
+function resetMatch(room) {
+  room.teamKills = { red: 0, blue: 0 };
+  room.winner = null;
+  room.state = room.cfg.id === 'duel' && room.players.size < 2 ? 'waiting' : 'playing';
+  for (const p of room.players.values()) { p.k = 0; p.d = 0; }
+  broadcast(room, { t: 'state', s: room.state, win: null });
+  broadcast(room, scoreMsg(room));
+  const now = Date.now();
+  for (const p of room.players.values()) spawnPlayer(room, p, now);
+}
+
+function removePlayer(p) {
+  const room = p.room;
+  if (!room || !room.players.delete(p.id)) return;
+  broadcast(room, { t: 'pleave', id: p.id });
+  if (!room.players.size) { rooms.delete(room.id); return; }
+  broadcast(room, scoreMsg(room));
+  if (room.cfg.id === 'duel' && room.players.size < 2 && room.state !== 'waiting') {
+    // L'adversaire est parti : le survivant attend un nouvel adversaire.
+    room.state = 'waiting';
+    broadcast(room, { t: 'state', s: 'waiting', win: null });
+  }
+}
+
+// ---------------------------------------------------------------- Tirs ----
+
+function sampleHist(q, t) {
+  const h = q.hist;
+  if (!h.length) return { x: q.x, y: q.y, z: q.z, yaw: q.yaw };
+  const last = h[h.length - 1];
+  if (t >= last[0]) return { x: last[1], y: last[2], z: last[3], yaw: last[4] };
+  if (t <= h[0][0]) return { x: h[0][1], y: h[0][2], z: h[0][3], yaw: h[0][4] };
+  for (let i = h.length - 2; i >= 0; i--) {
+    if (h[i][0] <= t) {
+      const a = h[i], b = h[i + 1];
+      const f = (t - a[0]) / (b[0] - a[0] || 1);
+      return { x: a[1] + (b[1] - a[1]) * f, y: a[2] + (b[2] - a[2]) * f, z: a[3] + (b[3] - a[3]) * f, yaw: b[4] };
+    }
+  }
+  return { x: last[1], y: last[2], z: last[3], yaw: last[4] };
+}
+
+function falloff(w, dist) {
+  if (!w.falloff) return 1;
+  const [r0, r1, min] = w.falloff;
+  if (dist <= r0) return 1;
+  if (dist >= r1) return min;
+  return 1 - (1 - min) * ((dist - r0) / (r1 - r0));
+}
+
+function handleFire(p, m, now) {
+  const room = p.room;
+  if (!p.alive || room.state === 'ended') return;
+  const wi = m.w | 0;
+  const w = WEAPONS[wi];
+  if (!w) return;
+
+  // Cadence de tir (avec une tolérance pour la gigue réseau)
+  if (now + 100 < p.nextFire) return;
+  p.nextFire = Math.max(p.nextFire, now - 60) + w.interval;
+  p.protectUntil = 0; // tirer annule la protection d'apparition
+
+  let dx = +m.dx, dy = +m.dy, dz = +m.dz;
+  if (!Number.isFinite(dx + dy + dz)) return;
+  const dl = Math.hypot(dx, dy, dz);
+  if (dl < 0.5) return;
+  dx /= dl; dy /= dl; dz /= dl;
+
+  let ox = +m.ox, oy = +m.oy, oz = +m.oz;
+  const ex = p.x, ey = p.y + EYE_HEIGHT, ez = p.z;
+  if (!Number.isFinite(ox + oy + oz) || Math.hypot(ox - ex, oy - ey, oz - ez) > 3) { ox = ex; oy = ey; oz = ez; }
+
+  const rng = mulberry32(m.seed | 0);
+  const spread = w.scopeSpread !== undefined && m.sc ? w.scopeSpread : w.spread;
+  const maxD = w.melee ? w.range : MAX_RAY;
+  const rewindT = clamp(Number.isFinite(+m.rt) ? +m.rt : now, now - REWIND_MAX_MS, now);
+  const pad = w.melee ? 0.25 : 0;
+
+  // Cibles au moment (rembobiné) où le tireur a vu l'écran
+  const targets = [];
+  for (const q of room.players.values()) {
+    if (q === p || !q.alive || now < q.protectUntil) continue;
+    if (room.cfg.teams && q.team === p.team) continue;
+    targets.push({ q, ...sampleHist(q, rewindT) });
+  }
+
+  const hits = new Map(); // id -> { q, dmg, head, backstab }
+  const ends = [];
+  for (let i = 0; i < w.pellets; i++) {
+    const [px, py, pz] = applySpread(dx, dy, dz, spread, rng);
+    let tMap = maxD;
+    for (const b of BOXES) {
+      const t = rayAABB(ox, oy, oz, px, py, pz, b.x0, b.y0, b.z0, b.x1, b.y1, b.z1, tMap);
+      if (t >= 0 && t < tMap) tMap = t;
+    }
+    let best = null;
+    for (const tg of targets) {
+      const tb = rayAABB(ox, oy, oz, px, py, pz,
+        tg.x - BODY_HALF - pad, tg.y, tg.z - BODY_HALF - pad, tg.x + BODY_HALF + pad, tg.y + BODY_TOP, tg.z + BODY_HALF + pad, tMap);
+      const th = rayAABB(ox, oy, oz, px, py, pz,
+        tg.x - HEAD_HALF - pad, tg.y + BODY_TOP, tg.z - HEAD_HALF - pad, tg.x + HEAD_HALF + pad, tg.y + HEAD_TOP, tg.z + HEAD_HALF + pad, tMap);
+      let t = -1, head = false;
+      if (th >= 0 && (tb < 0 || th <= tb)) { t = th; head = true; } else if (tb >= 0) t = tb;
+      if (t >= 0 && t < tMap && (!best || t < best.t)) best = { tg, t, head };
+    }
+    const dist = best ? best.t : tMap;
+    ends.push([r2(ox + px * dist), r2(oy + py * dist), r2(oz + pz * dist)]);
+    if (best) {
+      let dmg = w.dmg * (best.head ? w.headMul : 1) * falloff(w, best.t);
+      let backstab = false;
+      if (w.melee) {
+        // dans le dos ? (les deux regardent dans le même sens)
+        const fx = -Math.sin(p.yaw), fz = -Math.cos(p.yaw);
+        const vx = -Math.sin(best.tg.yaw), vz = -Math.cos(best.tg.yaw);
+        if (fx * vx + fz * vz > 0.35) { dmg = w.backstab; backstab = true; }
+      }
+      const h = hits.get(best.tg.q.id) || { q: best.tg.q, dmg: 0, head: false, backstab: false };
+      h.dmg += dmg;
+      h.head = h.head || best.head;
+      h.backstab = h.backstab || backstab;
+      hits.set(h.q.id, h);
+    }
+  }
+
+  // Visuel du tir pour les autres joueurs
+  broadcast(room, { t: 'shot', id: p.id, w: wi, o: [r2(ox), r2(oy), r2(oz)], e: ends }, p);
+
+  for (const h of hits.values()) applyDamage(room, p, h.q, h.dmg, h.head, wi, now);
+}
+
+function applyDamage(room, atk, vic, amount, head, wi, now) {
+  if (!vic.alive || room.state === 'ended') return;
+  vic.hp -= amount;
+  vic.lastDamage = now;
+  const dead = vic.hp <= 0;
+  send(atk, { t: 'hit', v: vic.id, d: Math.round(amount), h: head ? 1 : 0, k: dead ? 1 : 0 });
+  if (!dead) {
+    send(vic, { t: 'dmg', a: atk.id, hp: Math.ceil(vic.hp), x: r2(atk.x), z: r2(atk.z) });
+    return;
+  }
+  vic.hp = 0; vic.alive = false; vic.d++;
+  vic.respawnAt = now + RESPAWN_MS;
+  atk.k++;
+  if (room.cfg.teams) room.teamKills[atk.team]++;
+  broadcast(room, { t: 'kill', a: atk.id, v: vic.id, w: wi, h: head ? 1 : 0 });
+  broadcast(room, scoreMsg(room));
+  checkWin(room, atk, now);
+}
+
+function checkWin(room, lastKiller, now) {
+  const limit = room.killLimit;
+  let winner = null;
+  if (room.cfg.teams) {
+    if (room.teamKills.red >= limit) winner = { team: 'red' };
+    else if (room.teamKills.blue >= limit) winner = { team: 'blue' };
+  } else if (lastKiller.k >= limit) {
+    winner = { id: lastKiller.id };
+  }
+  if (!winner) return;
+  room.state = 'ended';
+  room.winner = winner;
+  room.endAt = now + END_SCREEN_MS;
+  broadcast(room, { t: 'state', s: 'ended', win: winner, until: room.endAt });
+}
+
+// ---------------------------------------------------------------- Messages ----
+
+function handleMessage(ws, raw) {
+  let m;
+  try { m = JSON.parse(raw); } catch { return; }
+  if (!m || typeof m.t !== 'string') return;
+  const now = Date.now();
+
+  if (m.t === 'ping') return ws.send(JSON.stringify({ t: 'pong', c: m.c, s: now }));
+
+  if (m.t === 'join') {
+    if (ws.player) return;
+    const mode = MODES[m.mode] ? m.mode : 'ffa';
+    const room = findRoom(mode, cleanRoom(m.room));
+    if (!room) return ws.send(JSON.stringify({ t: 'error', msg: 'Ce salon est complet.' }));
+    const p = addPlayer(room, ws, m.name);
+    send(p, {
+      t: 'welcome', id: p.id, ts: now, team: p.team,
+      room: { id: room.id, name: room.name, mode: room.mode, limit: room.killLimit },
+      players: [...room.players.values()].map(publicPlayer),
+      state: room.state, win: room.winner, until: room.endAt,
+      teamKills: room.teamKills,
+    });
+    broadcast(room, { t: 'pjoin', p: publicPlayer(p) }, p);
+    if (room.cfg.id === 'duel' && room.players.size >= 2 && room.state === 'waiting') {
+      resetMatch(room); // le 2e joueur est arrivé : le duel démarre, scores remis à zéro
+    } else {
+      spawnPlayer(room, p, now);
+      broadcast(room, scoreMsg(room));
+    }
+    return;
+  }
+
+  const p = ws.player;
+  if (!p) return;
+
+  if (m.t === 'in') {
+    if (!p.alive) return;
+    const x = +m.x, y = +m.y, z = +m.z;
+    if (!Number.isFinite(x + y + z)) return;
+    p.x = clamp(x, -HALF, HALF); p.z = clamp(z, -HALF, HALF); p.y = clamp(y, -5, 20);
+    p.yaw = Number.isFinite(+m.yaw) ? +m.yaw : p.yaw;
+    p.pitch = clamp(Number.isFinite(+m.pitch) ? +m.pitch : p.pitch, -1.6, 1.6);
+    const wi = m.w | 0;
+    if (WEAPONS[wi]) p.weapon = wi;
+  } else if (m.t === 'fire') {
+    handleFire(p, m, now);
+  }
+}
+
+// ---------------------------------------------------------------- Boucle ----
+
+setInterval(() => {
+  const now = Date.now();
+  for (const room of rooms.values()) {
+    // fin de manche -> nouvelle manche
+    if (room.state === 'ended' && now >= room.endAt) resetMatch(room);
+
+    const snap = [];
+    for (const p of room.players.values()) {
+      if (!p.alive && p.respawnAt && now >= p.respawnAt && room.state !== 'ended') {
+        p.respawnAt = 0;
+        spawnPlayer(room, p, now);
+      }
+      if (p.alive) {
+        if (p.hp < MAX_HP && now - p.lastDamage > REGEN_DELAY_MS) p.hp = Math.min(MAX_HP, p.hp + REGEN_PER_S * (TICK_MS / 1000));
+        p.hist.push([now, p.x, p.y, p.z, p.yaw]);
+        while (p.hist.length && now - p.hist[0][0] > 1000) p.hist.shift();
+      }
+      snap.push([p.id, r2(p.x), r2(p.y), r2(p.z), r2(p.yaw), r2(p.pitch), Math.ceil(p.hp), p.weapon, p.alive && now < p.protectUntil ? 1 : 0]);
+    }
+    broadcast(room, { t: 's', ts: now, p: snap });
+  }
+}, TICK_MS);
+
+// ---------------------------------------------------------------- WebSocket ----
+
+const wss = new WebSocketServer({ server: httpServer, path: '/ws', maxPayload: 2048 });
+
+wss.on('connection', (ws) => {
+  ws.isAlive = true;
+  ws.msgCount = 0;
+  ws.on('pong', () => { ws.isAlive = true; });
+  ws.on('message', (data) => {
+    if (++ws.msgCount > 150) return; // anti-flood : un client normal envoie ~35 msg/s
+    handleMessage(ws, data.toString());
+  });
+  ws.on('close', () => { if (ws.player) removePlayer(ws.player); });
+  ws.on('error', () => {});
+});
+
+setInterval(() => { for (const ws of wss.clients) ws.msgCount = 0; }, 1000);
+
+// Coupe les connexions mortes (utile derrière le proxy de Hugging Face)
+setInterval(() => {
+  for (const ws of wss.clients) {
+    if (!ws.isAlive) { ws.terminate(); continue; }
+    ws.isAlive = false;
+    ws.ping();
+  }
+}, 15000);
+
+httpServer.listen(PORT, () => console.log(`FPIXEL serveur prêt sur http://localhost:${PORT}`));

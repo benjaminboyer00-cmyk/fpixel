@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#0e1116">
+  <meta name="description" content="FPIXEL — mini FPS pixel multijoueur pour jouer entre potes.">
+  <title>FPIXEL</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%230e1116'/%3E%3Crect x='3' y='3' width='4' height='4' fill='%23ffb703'/%3E%3Crect x='9' y='9' width='4' height='4' fill='%23e5484d'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="css/style.css">
+  <script type="importmap">{ "imports": { "three": "./vendor/three.min.js" } }</script>
+</head>
+<body>
+  <canvas id="game"></canvas>
+  <div id="scope" class="hidden"></div>
+
+  <!-- ============================ HUD ============================ -->
+  <div id="hud" class="hidden">
+    <div id="topbar"><div id="score-line"></div><div id="score-sub"></div></div>
+    <div id="killfeed"></div>
+    <div id="crosshair"><i></i><i></i><i></i><i></i></div>
+    <div id="hitmarker"></div>
+    <div id="dmg-flash"></div>
+    <div id="dmg-arrow"></div>
+    <div id="banner"></div>
+    <div id="death" class="hidden"><div id="death-title"></div><div id="death-sub"></div></div>
+    <div id="bottom-left"><div id="hp-bar"><div id="hp-fill"></div></div><div id="hp-text">100</div></div>
+    <div id="bottom-right"><div id="weapon-name"></div><div id="ammo"></div></div>
+    <div id="weapons"></div>
+    <div id="netinfo"></div>
+    <div id="scoreboard" class="hidden"></div>
+  </div>
+
+  <!-- ====================== Contrôles tactiles ====================== -->
+  <div id="touch" class="hidden">
+    <div id="stick-base"><div id="stick-knob"></div></div>
+    <div id="t-weapons"></div>
+    <button class="tbtn" data-act="fire" id="t-fire">FEU</button>
+    <button class="tbtn" data-act="jump" id="t-jump">SAUT</button>
+    <button class="tbtn" data-act="reload" id="t-reload">R</button>
+    <button class="tbtn" data-act="scope" id="t-scope">ZOOM</button>
+    <button class="tbtn small" data-act="score" id="t-score">☰</button>
+    <button class="tbtn small" data-act="pause" id="t-pause">⚙</button>
+  </div>
+
+  <div id="portrait-hint">📱 Tourne ton téléphone en mode paysage</div>
+
+  <!-- ============================ Menu ============================ -->
+  <div id="menu" class="overlay">
+    <div class="panel">
+      <h1 class="logo"><span>F</span>PIXEL</h1>
+      <p class="tagline">FPS pixel pour jouer entre potes</p>
+
+      <label class="field f-name">Pseudo
+        <input id="name" type="text" maxlength="14" placeholder="Ton pseudo" autocomplete="off" spellcheck="false">
+      </label>
+
+      <div class="modes" id="modes">
+        <button class="mode" data-mode="duel"><b>⚔ 1v1</b><small>Duel · 10 frags</small><em data-count="duel"></em></button>
+        <button class="mode" data-mode="tdm"><b>🔴🔵 Équipes</b><small>Rouge vs Bleu · 30 frags</small><em data-count="tdm"></em></button>
+        <button class="mode" data-mode="ffa"><b>💀 Chacun pour soi</b><small>Tous contre tous · 20 frags</small><em data-count="ffa"></em></button>
+      </div>
+
+      <label class="field f-room">Salon privé <span class="opt">(optionnel — même nom = même salon)</span>
+        <input id="room" type="text" maxlength="12" placeholder="ex : potes" autocomplete="off" spellcheck="false">
+      </label>
+
+      <button id="play" class="btn primary">JOUER</button>
+      <button id="open-settings" class="btn">Réglages (sensibilité…)</button>
+      <div id="status" class="status"><i></i><span>Connexion au serveur…</span></div>
+
+      <details class="help">
+        <summary>Contrôles</summary>
+        <p class="desktop-only"><b>ZQSD / WASD</b> bouger · <b>Souris</b> viser · <b>Clic gauche</b> tirer · <b>Clic droit</b> zoom sniper · <b>Espace</b> sauter · <b>R</b> recharger · <b>1-5 / molette</b> armes · <b>Tab</b> scores · <b>Échap</b> pause</p>
+        <p class="touch-only"><b>Joystick gauche</b> bouger · <b>Glisser à droite</b> viser · <b>FEU</b> tirer (glisse dessus pour viser en tirant) · <b>ZOOM</b> pour le sniper</p>
+      </details>
+    </div>
+  </div>
+
+  <!-- ============================ Pause ============================ -->
+  <div id="pause" class="overlay hidden">
+    <div class="panel small">
+      <h2>PAUSE</h2>
+      <button id="resume" class="btn primary">Reprendre</button>
+      <button id="pause-settings" class="btn">Réglages</button>
+      <button id="quit" class="btn danger">Quitter la partie</button>
+    </div>
+  </div>
+
+  <!-- ============================ Réglages ============================ -->
+  <div id="settings" class="overlay hidden">
+    <div class="panel">
+      <h2>RÉGLAGES</h2>
+      <div class="row"><label for="s-sens">Sensibilité</label><input id="s-sens" type="range" min="0.1" max="5" step="0.05"><output id="o-sens"></output></div>
+      <div class="row"><label for="s-scope">Sensibilité zoom sniper</label><input id="s-scope" type="range" min="0.2" max="2" step="0.05"><output id="o-scope"></output></div>
+      <div class="row"><label for="s-fov">Champ de vision (horizontal)</label><input id="s-fov" type="range" min="70" max="120" step="1"><output id="o-fov"></output></div>
+      <div class="row"><label for="s-scale">Qualité (résolution)</label><input id="s-scale" type="range" min="0.3" max="1" step="0.05"><output id="o-scale"></output></div>
+      <div class="row"><label for="s-vol">Volume</label><input id="s-vol" type="range" min="0" max="1" step="0.05"><output id="o-vol"></output></div>
+      <div class="row"><label for="s-inv">Inverser l'axe vertical</label><input id="s-inv" type="checkbox"></div>
+      <button id="close-settings" class="btn primary">OK</button>
+    </div>
+  </div>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
