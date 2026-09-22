@@ -88,14 +88,16 @@ export class Fx {
 
   addProj(id, kind, x, y, z, vx, vy, vz, g, bounce = 0) {
     const orb = kind === 'orb';
+    const raygun = kind === 'raygun';
+    const cheat = kind === 'cheat';
     const grenade = kind === 'grenade' || kind === 'frag' || orb;
-    const sz = orb ? 1.7 : grenade ? 0.24 : 0.16;
+    const sz = orb ? 1.7 : grenade ? 0.24 : raygun ? 0.22 : cheat ? 0.2 : 0.16;
     const m = new THREE.Mesh(
-      new THREE.BoxGeometry(sz, sz, grenade ? sz : 0.5),
-      new THREE.MeshBasicMaterial({ color: orb ? 0xc040ff : grenade ? 0x4d5a3d : 0xd9d9d9, fog: false }));
+      new THREE.BoxGeometry(sz, sz, grenade || raygun ? sz : 0.5),
+      new THREE.MeshBasicMaterial({ color: orb ? 0xc040ff : grenade ? 0x4d5a3d : raygun ? 0x39ff6a : cheat ? 0xff3b1f : 0xd9d9d9, fog: false }));
     m.position.set(x, y, z);
     this.scene.add(m);
-    this.projs.set(id, { m, vx, vy, vz, g, trail: 0, grenade, bounce, orb });
+    this.projs.set(id, { m, vx, vy, vz, g, trail: 0, grenade: grenade || raygun, raygun, cheat, bounce, orb });
   }
 
   // Rebond calculé par le serveur : on recale la position et la vitesse
@@ -220,7 +222,7 @@ export class Fx {
       }
       if (!p.grenade) p.m.lookAt(p.m.position.x + p.vx, p.m.position.y + p.vy, p.m.position.z + p.vz);
       p.trail -= dt;
-      if (p.trail <= 0) { p.trail = p.orb ? 0.02 : 0.035; this.burst(p.m.position.x, p.m.position.y, p.m.position.z, p.orb ? '#c040ff' : p.grenade ? '#8a8a8a' : '#ffb04a', p.orb ? 5 : 1, p.orb ? 5 : 0.6, 0.5); if (p.orb) p.m.rotation.y += 0.4; }
+      if (p.trail <= 0) { p.trail = p.orb ? 0.02 : 0.035; this.burst(p.m.position.x, p.m.position.y, p.m.position.z, p.orb ? '#c040ff' : p.raygun ? '#39ff6a' : p.cheat ? '#ffd400' : p.grenade ? '#8a8a8a' : '#ffb04a', p.orb ? 5 : 1, p.orb ? 5 : 0.6, 0.5); if (p.orb) p.m.rotation.y += 0.4; }
     }
     const k = 1 - Math.exp(-dt * 18);
     for (const p of this.planes.values()) {

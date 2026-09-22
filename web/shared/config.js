@@ -8,6 +8,7 @@ export const REWIND_MAX_MS = 400;     // compensation de lag maximale côté ser
 export const MAX_RAY = 200;
 
 export const EYE_HEIGHT = 1.6;
+export const EYE_HEIGHT_CROUCH = 1.05;  // caméra accroupie
 export const PLAYER_HEIGHT = 1.8;
 export const PLAYER_RADIUS = 0.35;
 export const MAX_HP = 100;
@@ -22,12 +23,17 @@ export const WALK_SPEED = 6.5;
 export const JUMP_SPEED = 7.8;
 export const GRAVITY = 24;
 export const STEP_HEIGHT = 0.55;
+export const SPRINT_MUL = 1.4;          // vitesse en sprint
+export const CROUCH_SPEED_MUL = 0.55;   // vitesse accroupi
 
 // Hitboxes (relatives aux pieds du joueur)
 export const BODY_HALF = 0.35;
 export const BODY_TOP = 1.4;
 export const HEAD_HALF = 0.25;
 export const HEAD_TOP = 1.85;
+// Accroupi : profil plus bas (plus dur à toucher, surtout à la tête)
+export const BODY_TOP_CROUCH = 0.95;
+export const HEAD_TOP_CROUCH = 1.3;
 
 export const MODES = {
   duel: { id: 'duel', label: '1v1', desc: 'Duel, premier à 10 frags', max: 2, fill: 2, killLimit: 10, teams: false },
@@ -49,6 +55,7 @@ export const WEAPONS = [
     id: 'ar', name: "Fusil d'assaut", key: '1', auto: true, interval: 100, cost: 2,
     dmg: 20, headMul: 1.5, pellets: 1, spread: 0.014,
     mag: 30, reload: 1900, falloff: [35, 90, 0.6], speed: 1.0, recoil: 0.5,
+    ads: { zoomMul: 0.8, spread: 0.004 },
   },
   {
     id: 'shotgun', name: 'Fusil à pompe', key: '2', auto: false, interval: 900, cost: 2,
@@ -94,6 +101,7 @@ export const WEAPONS = [
   {
     id: 'minigun', name: 'Minigun', cost: 4, auto: true, interval: 45,
     dmg: 9, headMul: 1.3, pellets: 1, spread: 0.045, mag: 120, reload: 3600, falloff: [25, 60, 0.5], speed: 0.72, recoil: 0.25,
+    ads: { zoomMul: 0.88, spread: 0.022 },
   },
   {
     id: 'grenade', name: 'Lance-grenades', kind: 'rocket', cost: 3, auto: false, interval: 900,
@@ -109,6 +117,7 @@ export const WEAPONS = [
   {
     id: 'carbine', name: 'Carabine', cost: 3, auto: false, interval: 1600,
     dmg: 110, headMul: 2, pellets: 1, spread: 0, mag: 4, reload: 3000, falloff: null, speed: 0.95, recoil: 2.6,
+    ads: { zoomMul: 0.7, spread: 0 },
   },
   {
     id: 'flame', name: 'Lance-flammes', kind: 'flame', streak: 1, cost: 99, auto: true, interval: 50,
@@ -138,10 +147,35 @@ export const WEAPONS = [
     id: 'plane', name: 'Avion en papier', kind: 'plane', cost: 10, auto: false, interval: 1500,
     dmg: 0, headMul: 1, pellets: 1, spread: 0, mag: 2, reload: 6000, falloff: null, speed: 1, recoil: 0,
   },
+  // ---- armes bonus (index 18, 19) ----
+  {
+    // Pistolet laser : petit projectile explosif énergétique, rapide, dégâts modérés + zone (façon Ray Gun).
+    id: 'raygun', name: 'Pistolet laser', kind: 'rocket', cost: 3, auto: false, interval: 550,
+    dmg: 55, headMul: 1.4, pellets: 1, spread: 0.006, mag: 8, reload: 1800, falloff: null, speed: 1.0, recoil: 1.0,
+    proj: { speed: 30, gravity: 0, life: 2.2, radius: 2.6, minMul: 0.3, self: 0.4, knock: 10 },
+  },
+  {
+    // Ballista : sniper semi-rapide (cadence et rechargement meilleurs que le Sniper de base, un peu moins de dégâts).
+    id: 'ballista', name: 'Ballista', cost: 4, auto: false, interval: 950,
+    dmg: 85, headMul: 2.0, pellets: 1, spread: 0.05, scopeSpread: 0,
+    mag: 7, reload: 2200, falloff: null, speed: 0.96, recoil: 1.8, zoom: 30,
+  },
+  {
+    // Prototype X : arme secrète, uniquement obtenue via la boîte mystère (survie). Volontairement énorme
+    // (mini-lance-roquettes entièrement automatique) : item = jamais dans la boutique ni les classes perso.
+    id: 'cheat', name: 'Prototype X', kind: 'rocket', item: true, cost: 99, auto: true, interval: 130,
+    dmg: 130, headMul: 1, pellets: 1, spread: 0.012, mag: 50, reload: 1800, falloff: null, speed: 1.0, recoil: 0.35,
+    proj: { speed: 55, gravity: 0, life: 3, radius: 5, minMul: 0.45, self: 0.25, knock: 14 },
+  },
 ];
 
 // Index des armes
-export const W = { AR: 0, SHOTGUN: 1, SNIPER: 2, REVOLVER: 3, KNIFE: 4, ROCKET: 5, EXCALIBUR: 6, GRAPPLE: 7, PORTAL: 8, MINIGUN: 9, GRENADE: 10, LASER: 11, CARBINE: 12, FLAME: 13, NUKE: 14, FRAG: 15, ORB: 16, PLANE: 17 };
+export const W = { AR: 0, SHOTGUN: 1, SNIPER: 2, REVOLVER: 3, KNIFE: 4, ROCKET: 5, EXCALIBUR: 6, GRAPPLE: 7, PORTAL: 8, MINIGUN: 9, GRENADE: 10, LASER: 11, CARBINE: 12, FLAME: 13, NUKE: 14, FRAG: 15, ORB: 16, PLANE: 17, RAYGUN: 18, BALLISTA: 19, CHEAT: 20 };
+
+// Boîte mystère (survie) : arme aléatoire tirée de la boutique. Petite chance de tomber sur le prototype secret.
+export const MYSTERY_POOL = WEAPONS.map((w, i) => i).filter((i) => WEAPONS[i].streak === undefined && !WEAPONS[i].item);
+export const MYSTERY_RARE = W.CHEAT;
+export const MYSTERY_RARE_CHANCE = 0.06;
 
 // Grenades à main : 2 en réserve, une revient toutes les 12 s
 export const NADE_MAX = 2;
@@ -204,6 +238,7 @@ const shopWeapon = (id, w, price) => ({ id, kind: 'weapon', w, price });
 export const SHOP = [
   { id: 'heal', kind: 'heal', name: 'Soins', desc: 'Vie pleine', price: 80 },
   { id: 'nades', kind: 'nades', name: 'Grenades', desc: 'Réserve pleine', price: 60 },
+  { id: 'mystery', kind: 'mystery', name: '🎁 Boîte mystère', desc: 'Arme aléatoire... peut-être le prototype secret', price: 400 },
   { id: 'hp', kind: 'up', stat: 'hp', name: '+25 PV max', desc: 'Vie maximale', base: 250, growth: 1.5, max: 8 },
   { id: 'dmg', kind: 'up', stat: 'dmg', name: '+15 % de dégâts', desc: 'Toutes les armes', base: 500, growth: 1.6, max: 8 },
   { id: 'spd', kind: 'up', stat: 'spd', name: '+6 % de vitesse', desc: 'Déplacement', base: 300, growth: 1.5, max: 5 },
@@ -213,7 +248,9 @@ export const SHOP = [
   shopWeapon('w-ar', W.AR, 350),
   shopWeapon('w-sniper', W.SNIPER, 650),
   shopWeapon('w-carbine', W.CARBINE, 750),
+  shopWeapon('w-raygun', W.RAYGUN, 800),
   shopWeapon('w-grenade', W.GRENADE, 900),
+  shopWeapon('w-ballista', W.BALLISTA, 950),
   shopWeapon('w-excalibur', W.EXCALIBUR, 1300),
   shopWeapon('w-rocket', W.ROCKET, 1600),
   shopWeapon('w-minigun', W.MINIGUN, 2200),

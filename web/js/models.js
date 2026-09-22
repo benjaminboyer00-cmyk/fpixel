@@ -161,6 +161,32 @@ export function buildGun(id) {
       g.add(box(0.02, 0.14, 0.18, '#d9d4c4', 0, 0.08, -0.05));
       muzzle = [0, 0, -0.62];
       break;
+    case 'raygun':
+      g.add(box(0.09, 0.09, 0.34, '#8a5a2e', 0, 0, -0.15));       // corps cuivré
+      g.add(box(0.1, 0.03, 0.1, '#c9c9c9', 0, 0.065, -0.26));     // bobine
+      g.add(box(0.05, 0.05, 0.22, '#39ff6a', 0, 0.01, -0.4));     // canon lumineux
+      g.add(box(0.035, 0.035, 0.035, '#baffce', 0, 0.01, -0.52)); // pointe
+      g.add(box(0.04, 0.1, 0.05, '#2a2d33', 0, -0.08, 0.02));     // poignée
+      muzzle = [0, 0.01, -0.56];
+      break;
+    case 'ballista':
+      g.add(box(0.032, 0.032, 0.78, '#23262b', 0, 0.02, -0.55));
+      g.add(box(0.06, 0.09, 0.42, '#3a3d44', 0, 0, -0.1));
+      g.add(box(0.06, 0.11, 0.28, '#3a3d44', 0, -0.02, 0.28));
+      g.add(box(0.05, 0.05, 0.24, '#111318', 0, 0.09, -0.15));    // lunette
+      g.add(box(0.07, 0.07, 0.035, '#111318', 0, 0.09, -0.27));
+      g.add(box(0.04, 0.08, 0.06, '#20242a', 0, -0.08, -0.03));
+      muzzle = [0, 0.02, -0.95];
+      break;
+    case 'cheat':
+      g.add(box(0.16, 0.16, 0.6, '#1a1a1a', 0, 0.02, -0.3));       // corps noir
+      g.add(box(0.2, 0.2, 0.1, '#ffd400', 0, 0.02, -0.68));        // bouche dorée
+      g.add(box(0.22, 0.22, 0.08, '#ffd400', 0, 0.02, -0.4));      // anneau doré
+      g.add(box(0.26, 0.26, 0.26, '#ff2e2e', 0, 0.02, -0.9));      // noyau rouge lumineux
+      g.add(box(0.05, 0.15, 0.06, '#2a2d33', 0, -0.13, 0));
+      g.add(box(0.16, 0.14, 0.2, '#1a1a1a', 0, 0.02, 0.22));
+      muzzle = [0, 0.02, -1.05];
+      break;
   }
   g.userData.muzzle = new THREE.Vector3(...muzzle);
   return g;
@@ -185,6 +211,9 @@ export const VM_POSE = {
   carbine: { p: [0.2, -0.24, -0.62], r: [0, 0, 0] },
   flame: { p: [0.21, -0.26, -0.58], r: [0, 0, 0] },
   nuke: { p: [0.22, -0.28, -0.55], r: [0, 0, 0] },
+  raygun: { p: [0.19, -0.22, -0.55], r: [0.05, 0, 0] },
+  ballista: { p: [0.2, -0.24, -0.6], r: [0, 0, 0] },
+  cheat: { p: [0.21, -0.27, -0.55], r: [0, 0, 0] },
 };
 
 // Joueur adverse : tête, torse, jambes, bras + arme. Faces vers -Z (comme la caméra à yaw 0).

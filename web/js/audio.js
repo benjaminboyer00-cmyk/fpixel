@@ -66,7 +66,7 @@ class Sfx {
     for (let i = 0; i * 0.45 * 1000 < ms; i++) this._tone({ dur: 0.42, freq: 520, freqEnd: 900, type: 'sawtooth', gain: 0.22, out, delay: i * 0.45 });
   }
 
-  // name: ar shotgun sniper revolver knife rocket grenade excalibur grapple portal minigun laser carbine flame nuke wave stun streak nukeboom boom | hit headshot kill hurt reload empty spawn
+  // name: ar shotgun sniper revolver knife rocket grenade excalibur grapple portal minigun laser carbine flame nuke raygun ballista cheat wave stun streak nukeboom boom | hit headshot kill hurt reload empty spawn
   // opts: gain (0..1, atténuation distance), pan (-1..1)
   play(name, { gain = 1, pan = 0 } = {}) {
     if (!this.ctx || this.volume <= 0 || gain <= 0.01) return;
@@ -166,6 +166,19 @@ class Sfx {
         break;
       case 'plane':
         this._burst({ dur: 0.4, type: 'bandpass', freq: 1500, freqEnd: 700, q: 0.4, gain: 0.35, out });
+        break;
+      case 'raygun':
+        this._tone({ dur: 0.09, freq: 2200, freqEnd: 500, type: 'sawtooth', gain: 0.35, out });
+        this._tone({ dur: 0.07, freq: 3200, freqEnd: 1200, type: 'sine', gain: 0.2, out, delay: 0.01 });
+        break;
+      case 'ballista':
+        this._burst({ dur: 0.55, type: 'lowpass', freq: 3800, freqEnd: 220, gain: 1.3, out });
+        this._tone({ dur: 0.38, freq: 95, freqEnd: 32, type: 'sawtooth', gain: 0.85, out });
+        break;
+      case 'cheat':
+        this._burst({ dur: 0.12, type: 'lowpass', freq: 2600, freqEnd: 300, gain: 1.1, out });
+        this._tone({ dur: 0.1, freq: 160, freqEnd: 50, type: 'sawtooth', gain: 0.55, out });
+        this._tone({ dur: 0.08, freq: 2400, freqEnd: 1800, type: 'sine', gain: 0.15, out, delay: 0.01 });
         break;
       case 'throw':
         this._burst({ dur: 0.18, type: 'bandpass', freq: 900, freqEnd: 300, q: 0.7, gain: 0.35, out });

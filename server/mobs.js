@@ -92,7 +92,7 @@ export function mobStep(room, m, now, dt) {
     if (now >= st.strafeUntil) { st.strafe = Math.random() < 0.5 ? -1 : 1; st.strafeUntil = now + 600 + Math.random() * 1200; }
     mvx = ux * fwd - uz * st.strafe * 0.7;
     mvz = uz * fwd + ux * st.strafe * 0.7;
-    if (Math.abs(m.yaw - desYaw) < 0.1 && now - st.seenAt >= st.react && now >= st.pause && now >= m.nextFire - 30) {
+    if (Math.abs(angDiff(m.yaw, desYaw)) < 0.1 && now - st.seenAt >= st.react && now >= st.pause && now >= m.nextFire - 30) {
       const [fx, fy, fz] = lookDir(m.yaw + (Math.random() - 0.5) * 2 * def.err, m.pitch + (Math.random() - 0.5) * 2 * def.err);
       fire = { w: def.weapon, ox: m.x, oy: m.y + EYE_HEIGHT, oz: m.z, dx: fx, dy: fy, dz: fz, seed: (Math.random() * 2147483647) | 0, sc: 0, rt: now };
       if (--st.burstLeft <= 0) { st.pause = now + 700 + Math.random() * 900; st.burstLeft = 2 + ((Math.random() * 3) | 0); }
@@ -106,6 +106,7 @@ export function mobStep(room, m, now, dt) {
   // rotation limitée, puis déplacement (2 sous-pas)
   const turn = def.weapon ? 3.5 : 5;
   m.yaw += clamp(angDiff(m.yaw, desYaw), -turn * dt, turn * dt);
+  if (m.yaw > Math.PI) m.yaw -= Math.PI * 2; else if (m.yaw < -Math.PI) m.yaw += Math.PI * 2;   // on ramène le cap dans [-π, π] pour ne pas dériver
   m.pitch = clamp(m.pitch + clamp(desPitch - m.pitch, -3 * dt, 3 * dt), -1.2, 1.2);
   if (now - st.lastCheck > 700) {                                 // coincé ? on saute
     if ((mvx || mvz) && Math.hypot(m.x - st.lastPos.x, m.z - st.lastPos.z) < 0.35) jump = m.onGround;

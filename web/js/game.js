@@ -1,7 +1,7 @@
 // Boucle de jeu : joueur local (prédit côté client), autres joueurs (interpolés), tirs, effets, HUD.
 import * as THREE from 'three';
 import {
-  TICK_MS, INTERP_MS, MIN_INTERP_MS, MAX_EXTRAP_MS, MODES, EYE_HEIGHT, MAX_HP, RESPAWN_MS, WALK_SPEED, JUMP_SPEED, WEAPONS, GUN_ORDER, KNIFE, resolveClass, STREAK_WEAPONS,
+  TICK_MS, INTERP_MS, MIN_INTERP_MS, MAX_EXTRAP_MS, MODES, EYE_HEIGHT, EYE_HEIGHT_CROUCH, MAX_HP, RESPAWN_MS, WALK_SPEED, JUMP_SPEED, SPRINT_MUL, CROUCH_SPEED_MUL, WEAPONS, GUN_ORDER, KNIFE, resolveClass, STREAK_WEAPONS,
 } from '../shared/config.js';
 import { mapById } from '../shared/map.js';
 import { mulberry32, applySpread, lookDir, clamp, angleLerp, rayAABB } from '../shared/util.js';
@@ -50,6 +50,7 @@ export class Game {
     this.players = new Map();
     this.portals = new Map();   // id du propriétaire -> [portail bleu, portail orange]
     this.shake = 0;
+    this._crouchT = 0;
     this.interp = INTERP_MS;    // retard d'affichage des autres joueurs (ms), ajusté à la gigue du réseau
     this._jit = 0; this._lastSnapAt = 0; this._predAt = 0;
     this.mvp = null; this.onMatchEnd = null;
@@ -95,7 +96,9 @@ export class Game {
 
   _applyFov(snap) {
     const w = WEAPONS[this.me?.weapon ?? 0];
-    const target = this.me?.scoped && w.zoom ? w.zoom : this.baseVFov();
+    const me = this.me;
+    const base = this.baseVFov();
+    const target = me?.scoped && w.zoom ? w.zoom : me?.aiming && w.ads ? base * w.ads.zoomMul : base;
     this.fov = snap || !this.fov ? target : this.fov + (target - this.fov) * 0.35;
     if (snap || Math.abs(this.camera.fov - this.fov) > 0.01) {
       this.camera.fov = this.fov;
@@ -130,7 +133,7 @@ export class Game {
       x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: 0, onGround: true, yaw: 0, pitch: 0,
       level, loadout, maxHp: MAX_HP, speedMul: 1, nades: 0, nadeReady: 0, cash: 0, up: { hp: 0, dmg: 0, spd: 0 }, charging: false, chargeAt: 0, flight: null, lastPc: 0, preYaw: 0, prePitch: 0, pull: null, portalUntil: 0, stunUntil: 0, altUntil: {}, jumpPrev: false,
       hp: MAX_HP, alive: false, spawned: false, weapon: loadout[0], ammo: WEAPONS.map((w) => w.mag),
-      reloadUntil: 0, nextFire: 0, switchUntil: 0, scoped: false, scopeToggle: false,
+      reloadUntil: 0, nextFire: 0, switchUntil: 0, scoped: false, aiming: false, scopeToggle: false, crouch: false, sprinting: false,
       respawnAt: 0, killer: null, deadT: 0, prot: 0, lastSend: 0,
     };
     for (const p of welcome.players) this._addPlayer(p);
@@ -144,6 +147,7 @@ export class Game {
     this.hud.setStats(null);
     this.surv = welcome.surv || null; this.endWave = 0;
     this.fov = 0;
+    this._crouchT = 0;
     this._applyFov(true);
     this.scoreDirty = true;
     this.banner();
@@ -178,7 +182,7 @@ export class Game {
     document.body.classList.remove('ingame', 'survival');
     this.hud.hide();
     document.getElementById('scope').classList.add('hidden');
-    document.body.classList.remove('scoped');
+    document.body.classList.remove('scoped', 'aiming');
   }
 
   setPaused(v) {
@@ -250,7 +254,7 @@ export class Game {
       this._lastSnapAt = t;
       this.interp += (clamp(TICK_MS * 2 + this._jit * 2.5, MIN_INTERP_MS, 220) - this.interp) * 0.02;
       for (const e of m.p) {
-        const [id, x, y, z, yaw, pitch, hp, w, prot] = e;
+        const [id, x, y, z, yaw, pitch, hp, w, prot, crouch] = e;
         if (id === this.myId) {
           if (this.me?.alive) this.me.hp = hp;
           if (this.me) this.me.prot = prot;
@@ -259,7 +263,7 @@ export class Game {
         const p = this.players.get(id) || this._addPlayer({ id, name: '?', team: null });
         p.snaps.push({ ts: m.ts, x, y, z, yaw, pitch });
         if (p.snaps.length > 30) p.snaps.shift();
-        p.hp = hp; p.weapon = w; p.prot = prot;
+        p.hp = hp; p.weapon = w; p.prot = prot; p.crouch = !!crouch;
       }
     });
     n.on('spawn', (m) => this._onSpawn(m));
@@ -306,6 +310,11 @@ export class Game {
     n.on('stats', (m) => { if (this.me) { this.me.maxHp = m.maxHp; this.me.speedMul = m.speed; } });
     n.on('buyfail', (m) => this.hud.hint(m.why === 'cash' ? 'Pas assez de points' : m.why === 'owned' ? 'Tu l\'as déjà' : m.why === 'full' ? 'Rien à faire ici (déjà au maximum)' : 'Achat impossible', 2000));
     n.on('bought', () => sfx.play('spawn'));
+    n.on('mystery', (m) => { // boîte mystère : arme aléatoire (rare = le prototype)
+      const w = WEAPONS[m.w];
+      this.hud.hint(m.rare ? `🎁 ARME LÉGENDAIRE : ${w.name} !!` : `🎁 Boîte mystère : ${w.name}`, m.rare ? 5000 : 3000);
+      sfx.play(m.rare ? 'streak' : 'spawn');
+    });
     n.on('charge', (m) => { const p = this.players.get(m.id); if (p) p.charging = !!m.on; });   // canon à orbe : lueur pendant la charge
     n.on('planeOn', (m) => { // on prend les commandes de l'avion en papier
       const me = this.me;
@@ -313,7 +322,7 @@ export class Game {
       me.flight = { x: m.x, y: m.y, z: m.z, yaw: m.yaw, pitch: m.pitch, born: performance.now() };
       me.preYaw = me.yaw; me.prePitch = me.pitch;           // la souris sert à diriger l'avion ; on rendra la visée à la fin du vol
       me.yaw = m.yaw; me.pitch = m.pitch; me.lastPc = 0;
-      me.scoped = false; me.scopeToggle = false;
+      me.scoped = false; me.aiming = false; me.scopeToggle = false; me.crouch = false; me.sprinting = false;
       sfx.play('plane');
       this.hud.hint('AVION : souris = diriger · tir = abandonner · tête = mort, corps = 60', 5000);
     });
@@ -379,7 +388,7 @@ export class Game {
     n.on('stun', (m) => {
       const me = this.me;
       me.stunUntil = performance.now() + m.ms;
-      me.scoped = false; me.scopeToggle = false;
+      me.scoped = false; me.aiming = false; me.scopeToggle = false;
       this.hud.hint('ÉTOURDI !', m.ms);
       this.shake = Math.max(this.shake, 0.04);
       sfx.play('stun');
@@ -467,7 +476,7 @@ export class Game {
       const me = this.me;
       me.alive = false; me.deadT = 0; me.hp = 0; me.killer = m.a;
       me.respawnAt = performance.now() + RESPAWN_MS;
-      me.scoped = false; me.scopeToggle = false;
+      me.scoped = false; me.aiming = false; me.scopeToggle = false; me.crouch = false; me.sprinting = false;
       me.charging = false; me.flight = null;
       this.input.reset();
     } else {
@@ -573,11 +582,17 @@ export class Game {
       if (inp.takeNade()) this._throwNade(now);
       if (inp.takeShop() && this.mode === 'survival') this.onShop?.();
 
-      // --- zoom sniper ---
+      // --- zoom sniper / visée précise (AR, carabine, minigun...) ---
       if (inp.takeScopeToggle()) me.scopeToggle = !me.scopeToggle;
       const wantScope = isTouch ? me.scopeToggle : inp.scopeHeld;
       me.scoped = !!(w.zoom && wantScope && !me.reloadUntil);
-      if (!w.zoom) me.scopeToggle = false;
+      me.aiming = !!(w.ads && wantScope && !me.reloadUntil);
+      if (!w.zoom && !w.ads) me.scopeToggle = false;
+
+      // --- accroupi (bascule) / sprint (maintien, ou joystick à fond sur mobile) ---
+      if (inp.takeCrouchToggle() && !me.flight) me.crouch = !me.crouch;
+      const wantSprint = isTouch ? Math.hypot(inp.moveX, inp.moveY) > 0.85 : inp.sprintHeld;
+      me.sprinting = !!(wantSprint && !me.crouch && !me.scoped && !me.aiming && !me.charging && !me.flight);
 
       // --- tir ---
       // tir maintenu pour toutes les armes (cadence de l'arme) ; tir auto si un ennemi est dans le viseur
@@ -604,7 +619,7 @@ export class Game {
         if (firing) this._tryFire(now);
       }
     } else {
-      me.scoped = false;
+      me.scoped = false; me.aiming = false; me.sprinting = false;
     }
 
     // --- déplacement ---
@@ -621,7 +636,8 @@ export class Game {
         wz = fz * ny + rz * nx;
       }
     }
-    let speed = WALK_SPEED * w.speed * (me.scoped ? 0.5 : 1) * me.speedMul * (me.charging ? 0.35 : 1);
+    let speed = WALK_SPEED * w.speed * (me.scoped ? 0.5 : me.aiming ? 0.8 : 1)
+      * (me.crouch ? CROUCH_SPEED_MUL : me.sprinting ? SPRINT_MUL : 1) * me.speedMul * (me.charging ? 0.35 : 1);
     const stunned = now < me.stunUntil;
     if (stunned) { wx = wz = 0; me.vx = me.vz = 0; me.pull = null; }
     const jumpNow = active && inp.jumpHeld && !stunned && !me.flight;
@@ -660,7 +676,7 @@ export class Game {
         me.lastSend = now;
         const r = (v) => Math.round(v * 1000) / 1000;
         const fl = me.flight; // pendant le vol, le corps garde sa direction d'avant
-        this.net.send({ t: 'in', x: r(me.x), y: r(me.y), z: r(me.z), yaw: r(fl ? me.preYaw : me.yaw), pitch: r(fl ? me.prePitch : me.pitch), w: me.weapon });
+        this.net.send({ t: 'in', x: r(me.x), y: r(me.y), z: r(me.z), yaw: r(fl ? me.preYaw : me.yaw), pitch: r(fl ? me.prePitch : me.pitch), w: me.weapon, c: me.crouch ? 1 : 0 });
       }
     }
     me.speed2d = Math.hypot(me.vx, me.vz);
@@ -809,7 +825,7 @@ export class Game {
     if (me.charging) { me.charging = false; this.net.send({ t: 'charge', on: 0 }); }
     me.weapon = i;
     me.reloadUntil = 0;
-    me.scoped = false; me.scopeToggle = false;
+    me.scoped = false; me.aiming = false; me.scopeToggle = false;
     me.switchUntil = now + 250;
     this.viewmodel.setWeapon(i);
   }
@@ -848,7 +864,7 @@ export class Game {
     const me = this.me, w = WEAPONS[me.weapon];
     if (!w.mag || w.noReload || me.reloadUntil || me.ammo[me.weapon] >= w.mag) return;
     me.reloadUntil = now + w.reload;
-    me.scoped = false; me.scopeToggle = false;
+    me.scoped = false; me.aiming = false; me.scopeToggle = false;
     sfx.play('reload');
   }
 
@@ -872,7 +888,8 @@ export class Game {
     const ex = me.x, ey = me.y + EYE_HEIGHT, ez = me.z;
     const [dx, dy, dz] = lookDir(me.yaw, me.pitch);
     const seed = (Math.random() * 2147483647) | 0;
-    const spread = w.scopeSpread !== undefined && me.scoped ? w.scopeSpread : w.spread;
+    const spread = w.scopeSpread !== undefined && me.scoped ? w.scopeSpread
+      : w.ads && me.aiming && w.ads.spread !== undefined ? w.ads.spread : w.spread;
 
     this.net.send({
       t: 'fire', w: me.weapon, seed, sc: me.scoped ? 1 : 0, alt: alt ? 1 : 0,
@@ -950,6 +967,7 @@ export class Game {
       g.visible = true;
       g.position.set(x, y, z);
       g.rotation.y = yaw;
+      if (!p.mob) g.scale.y += ((p.crouch ? 0.72 : 1) - g.scale.y) * Math.min(1, dt * 10);   // accroupi : silhouette tassée
       p.model.head.rotation.x = clamp(pitch, -1.2, 1.2);
       p.model.setWeapon(WEAPONS[p.weapon]?.id ?? 'ar');
 
@@ -970,7 +988,8 @@ export class Game {
 
   _updateCamera(dt, now) {
     const me = this.me, cam = this.camera;
-    let eye = me.y + EYE_HEIGHT;
+    this._crouchT += ((me.crouch ? 1 : 0) - this._crouchT) * Math.min(1, dt * 10);
+    let eye = me.y + EYE_HEIGHT - (EYE_HEIGHT - EYE_HEIGHT_CROUCH) * this._crouchT;
     let roll = 0;
     if (!me.alive && me.spawned) {
       const k = Math.min(1, me.deadT * 2.5);
@@ -985,7 +1004,7 @@ export class Game {
       cam.rotation.set(fl.pitch, fl.yaw, clamp(d * 0.5, -0.5, 0.5));
       this._applyFov(false);
       document.getElementById('scope').classList.add('hidden');
-      document.body.classList.remove('scoped');
+      document.body.classList.remove('scoped', 'aiming');
       this.viewmodel.update(dt, { speed: 0, onGround: true, reloadProgress: null, visible: false });
       return;
     }
@@ -1002,6 +1021,7 @@ export class Game {
     const scopedIn = me.scoped && w.zoom && this.fov < w.zoom + 6;
     document.getElementById('scope').classList.toggle('hidden', !scopedIn);
     document.body.classList.toggle('scoped', scopedIn);
+    document.body.classList.toggle('aiming', !!(me.aiming && w.ads));
     this.viewmodel.update(dt, {
       speed: me.speed2d || 0,
       onGround: me.onGround,

@@ -116,12 +116,17 @@ body.touch .desktop-only, body:not(.touch) .touch-only { display: none; }
 #killfeed .me { outline: 2px solid var(--accent); }
 @keyframes fadeout { 0%, 80% { opacity: 1; } 100% { opacity: 0; } }
 #crosshair { position: absolute; top: 50%; left: 50%; width: 0; height: 0; }
-#crosshair i { position: absolute; background: #fff; box-shadow: 0 0 0 1px #000; }
+#crosshair i { position: absolute; background: #fff; box-shadow: 0 0 0 1px #000; transition: top .12s ease, left .12s ease, width .12s ease, height .12s ease; }
 #crosshair i:nth-child(1) { width: 2px; height: 8px; left: -1px; top: -14px; }
 #crosshair i:nth-child(2) { width: 2px; height: 8px; left: -1px; top: 6px; }
 #crosshair i:nth-child(3) { width: 8px; height: 2px; top: -1px; left: -14px; }
 #crosshair i:nth-child(4) { width: 8px; height: 2px; top: -1px; left: 6px; }
 body.scoped #crosshair { display: none; }
+/* Visée précise (AR, carabine, minigun...) : le réticule se resserre au lieu d'ouvrir un plein écran de lunette */
+body.aiming #crosshair i:nth-child(1) { height: 6px; top: -9px; }
+body.aiming #crosshair i:nth-child(2) { height: 6px; top: 3px; }
+body.aiming #crosshair i:nth-child(3) { width: 6px; left: -9px; }
+body.aiming #crosshair i:nth-child(4) { width: 6px; left: 3px; }
 #hitmarker { position: absolute; top: 50%; left: 50%; width: 26px; height: 26px; margin: -13px 0 0 -13px; opacity: 0; transition: opacity .15s; }
 #hitmarker::before, #hitmarker::after { content: ""; position: absolute; left: 12px; top: -3px; width: 3px; height: 32px; background: #fff; box-shadow: 0 0 0 1px #000; transform: rotate(45deg); }
 #hitmarker::after { transform: rotate(-45deg); }
@@ -174,6 +179,7 @@ body.scoped #crosshair { display: none; }
 #t-jump { right: calc(max(24px, env(safe-area-inset-right)) + 112px); bottom: max(28px, env(safe-area-inset-bottom)); width: 68px; height: 68px; font-size: 12px; }
 #t-reload { right: calc(max(24px, env(safe-area-inset-right)) + 12px); bottom: calc(max(24px, env(safe-area-inset-bottom)) + 112px); width: 58px; height: 58px; font-size: 16px; }
 #t-scope { right: calc(max(24px, env(safe-area-inset-right)) + 84px); bottom: calc(max(24px, env(safe-area-inset-bottom)) + 92px); width: 58px; height: 58px; font-size: 11px; }
+#t-crouch { left: max(10px, env(safe-area-inset-left)); top: 40%; width: 52px; height: 52px; font-size: 10px; }
 .tbtn.small { width: 40px; height: 40px; font-size: 16px; border-radius: 8px; top: max(8px, env(safe-area-inset-top)); }
 #t-pause { right: max(8px, env(safe-area-inset-right)); }
 #t-score { right: calc(max(8px, env(safe-area-inset-right)) + 48px); }

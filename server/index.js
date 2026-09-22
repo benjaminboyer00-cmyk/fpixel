@@ -9,8 +9,9 @@ import { WebSocketServer } from 'ws';
 
 import {
   TICK_MS, REWIND_MAX_MS, MAX_RAY, EYE_HEIGHT, MAX_HP, RESPAWN_MS, SPAWN_PROTECT_MS,
-  REGEN_DELAY_MS, REGEN_PER_S, END_SCREEN_MS, BODY_HALF, BODY_TOP, HEAD_HALF, HEAD_TOP,
+  REGEN_DELAY_MS, REGEN_PER_S, END_SCREEN_MS, BODY_HALF, BODY_TOP, HEAD_HALF, HEAD_TOP, BODY_TOP_CROUCH, HEAD_TOP_CROUCH,
   MODES, WEAPONS, GUN_ORDER, KNIFE, CLASSES, resolveClass, W, STREAK_WEAPONS, STREAK_AT, NUKE_GAS_MS, NUKE_GAS_DPS, NADE_MAX, NADE_REGEN_MS, SURV, shopItem, shopPrice,
+  MYSTERY_POOL, MYSTERY_RARE, MYSTERY_RARE_CHANCE,
 } from '../web/shared/config.js';
 import { MAPS, mapById } from '../web/shared/map.js';
 import { rayAABB, applySpread, mulberry32, clamp } from '../web/shared/util.js';
@@ -203,7 +204,7 @@ function newPlayer(room, id, ws, name, team) {
     streak: 0, streakAmmo: {}, stunUntil: 0, altUntil: {},
     nades: 0, nadeReady: 0, nadeRegenAt: 0, st: newStats(), chargeAt: 0,
     cash: 0, owned: [], up: { hp: 0, dmg: 0, spd: 0 }, dmgMul: 1, mob: null, mst: null, scale: 1, nextAtk: 0,   // survie
-    respawnAt: 0, protectUntil: 0, lastDamage: 0, nextFire: 0,
+    respawnAt: 0, protectUntil: 0, lastDamage: 0, nextFire: 0, crouch: false,
     hist: [],
   };
 }
@@ -438,7 +439,8 @@ function rayPlayers(targets, ox, oy, oz, dx, dy, dz, tMax, pad = 0) {
   let best = null;
   for (const tg of targets) {
     const sc = tg.q.scale || 1;   // les gros monstres ont une boîte de collision à leur taille
-    const bh = BODY_HALF * sc, bt = BODY_TOP * sc, hh = HEAD_HALF * sc, ht = HEAD_TOP * sc;
+    const crouch = tg.q.crouch;   // accroupi : profil plus bas, plus dur à toucher (surtout à la tête)
+    const bh = BODY_HALF * sc, bt = (crouch ? BODY_TOP_CROUCH : BODY_TOP) * sc, hh = HEAD_HALF * sc, ht = (crouch ? HEAD_TOP_CROUCH : HEAD_TOP) * sc;
     const tb = rayAABB(ox, oy, oz, dx, dy, dz,
       tg.x - bh - pad, tg.y, tg.z - bh - pad, tg.x + bh + pad, tg.y + bt, tg.z + bh + pad, tMax);
     const th = rayAABB(ox, oy, oz, dx, dy, dz,
@@ -767,6 +769,13 @@ function handleBuy(p, m) {
     else if (it.stat === 'spd') p.speedMul = 1 + 0.06 * p.up.spd;
     else p.dmgMul = 1 + 0.15 * p.up.dmg;
     send(p, { t: 'stats', maxHp: p.maxHp, speed: p.speedMul });
+  } else if (it.kind === 'mystery') {
+    if (p.loadout.length >= 9) return fail('full');
+    const wi = Math.random() < MYSTERY_RARE_CHANCE ? MYSTERY_RARE : MYSTERY_POOL[(Math.random() * MYSTERY_POOL.length) | 0];
+    if (!p.owned.includes(wi)) p.owned.push(wi);
+    if (!p.loadout.includes(wi)) p.loadout.push(wi);
+    send(p, { t: 'loadout', loadout: p.loadout });
+    send(p, { t: 'mystery', w: wi, rare: wi === MYSTERY_RARE });
   }
   p.cash -= price;
   sendCash(p);
@@ -1183,6 +1192,7 @@ function handleMessage(ws, raw) {
     p.x = clamp(x, -half, half); p.z = clamp(z, -half, half); p.y = clamp(y, -5, 20);
     p.yaw = Number.isFinite(+m.yaw) ? +m.yaw : p.yaw;
     p.pitch = clamp(Number.isFinite(+m.pitch) ? +m.pitch : p.pitch, -1.6, 1.6);
+    p.crouch = !!m.c;
     const wi = m.w | 0;
     if (p.loadout.includes(wi)) {
       if (wi !== p.weapon && p.chargeAt) { p.chargeAt = 0; broadcast(p.room, { t: 'charge', id: p.id, on: 0 }, p); }
@@ -1225,7 +1235,7 @@ setInterval(() => {
     for (const p of room.players.values()) {
       if (p.away) { // déconnecté : invisible et intouchable, retiré après le délai de grâce
         if (now >= p.graceUntil) expired.push(p);
-        snap.push([p.id, 0, 0, 0, 0, 0, 0, p.weapon, 0]);
+        snap.push([p.id, 0, 0, 0, 0, 0, 0, p.weapon, 0, 0]);
         continue;
       }
       if (!p.alive && p.respawnAt && now >= p.respawnAt && room.state !== 'ended') {
@@ -1246,7 +1256,7 @@ setInterval(() => {
         p.hist.push([now, p.x, p.y, p.z, p.yaw]);
         while (p.hist.length && now - p.hist[0][0] > 1000) p.hist.shift();
       }
-      snap.push([p.id, r2(p.x), r2(p.y), r2(p.z), r2(p.yaw), r2(p.pitch), Math.ceil(p.hp), p.weapon, p.alive && now < p.protectUntil ? 1 : 0]);
+      snap.push([p.id, r2(p.x), r2(p.y), r2(p.z), r2(p.yaw), r2(p.pitch), Math.ceil(p.hp), p.weapon, p.alive && now < p.protectUntil ? 1 : 0, p.crouch ? 1 : 0]);
     }
     stepSurvival(room, now);
     stepProjectiles(room, now, TICK_MS / 1000);
