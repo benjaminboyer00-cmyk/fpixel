@@ -4,6 +4,7 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
+import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 
@@ -50,6 +51,34 @@ function sendJson(res, obj) {
   res.end(JSON.stringify(obj));
 }
 
+// Fichiers statiques : compressés (gzip) et mis en cache mémoire une fois pour toutes en production (un déploiement
+// = un nouveau process = cache forcément à jour). En dev (`npm run dev`), on relit le disque à chaque requête pour
+// voir les changements sans redémarrer. L'ETag permet aux navigateurs de ne pas retélécharger un fichier inchangé
+// (304), important juste après le réveil d'un Space endormi où plusieurs joueurs chargent tout en même temps.
+const PROD = process.env.NODE_ENV === 'production';
+const COMPRESSIBLE = new Set(['.html', '.js', '.mjs', '.css', '.json', '.svg', '.txt']);
+const staticCache = new Map(); // chemin de fichier -> { data, gz, mime, etag }
+
+function loadStatic(file, cb) {
+  const cached = staticCache.get(file);
+  if (PROD && cached) return cb(null, cached);
+  fs.stat(file, (serr, st) => {
+    if (serr) return cb(serr);
+    fs.readFile(file, (err, data) => {
+      if (err) return cb(err);
+      const ext = path.extname(file);
+      const entry = {
+        data,
+        mime: MIME[ext] || 'application/octet-stream',
+        etag: `"${st.size}-${Math.round(st.mtimeMs)}"`,
+        gz: COMPRESSIBLE.has(ext) ? zlib.gzipSync(data) : null,
+      };
+      if (PROD) staticCache.set(file, entry);
+      cb(null, entry);
+    });
+  });
+}
+
 const httpServer = http.createServer((req, res) => {
   let pathname;
   try { pathname = decodeURIComponent(new URL(req.url, 'http://x').pathname); } catch { pathname = '/'; }
@@ -59,13 +88,17 @@ const httpServer = http.createServer((req, res) => {
   if (pathname.endsWith('/')) pathname += 'index.html';
   const file = path.normalize(path.join(WEB_ROOT, pathname));
   if (!file.startsWith(WEB_ROOT + path.sep)) { res.writeHead(403); return res.end('403'); }
-  fs.readFile(file, (err, data) => {
+  loadStatic(file, (err, entry) => {
     if (err) { res.writeHead(404, { 'Content-Type': 'text/plain' }); return res.end('404'); }
+    if (req.headers['if-none-match'] === entry.etag) { res.writeHead(304); return res.end(); }
+    const gz = entry.gz && (req.headers['accept-encoding'] || '').includes('gzip');
     res.writeHead(200, {
-      'Content-Type': MIME[path.extname(file)] || 'application/octet-stream',
+      'Content-Type': entry.mime,
       'Cache-Control': 'no-cache',
+      ETag: entry.etag,
+      ...(gz ? { 'Content-Encoding': 'gzip' } : {}),
     });
-    res.end(data);
+    res.end(gz ? entry.gz : entry.data);
   });
 });
 
