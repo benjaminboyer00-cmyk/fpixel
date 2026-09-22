@@ -1,7 +1,7 @@
 // Boucle de jeu : joueur local (prédit côté client), autres joueurs (interpolés), tirs, effets, HUD.
 import * as THREE from 'three';
 import {
-  TICK_MS, INTERP_MS, MIN_INTERP_MS, MAX_EXTRAP_MS, MODES, EYE_HEIGHT, EYE_HEIGHT_CROUCH, MAX_HP, RESPAWN_MS, WALK_SPEED, JUMP_SPEED, SPRINT_MUL, CROUCH_SPEED_MUL, WEAPONS, GUN_ORDER, KNIFE, resolveClass, STREAK_WEAPONS,
+  TICK_MS, INTERP_MS, MIN_INTERP_MS, MAX_EXTRAP_MS, MODES, EYE_HEIGHT, EYE_HEIGHT_CROUCH, MAX_HP, RESPAWN_MS, WALK_SPEED, JUMP_SPEED, SPRINT_MUL, CROUCH_SPEED_MUL, WEAPONS, GUN_ORDER, KNIFE, resolveClass, STREAK_WEAPONS, HEIST_ROB_MS,
 } from '../shared/config.js';
 import { mapById } from '../shared/map.js';
 import { mulberry32, applySpread, lookDir, clamp, angleLerp, rayAABB } from '../shared/util.js';
@@ -15,6 +15,7 @@ import { sfx } from './audio.js';
 import { isTouch, saveSettings } from './config.js';
 import { Minimap } from './minimap.js';
 import { stepPlane, PLANE } from '../shared/plane.js';
+import { stepCar, CAR } from '../shared/vehicle.js';
 
 const MAX_TRACER = 90;
 
@@ -134,6 +135,7 @@ export class Game {
       level, loadout, maxHp: MAX_HP, speedMul: 1, nades: 0, nadeReady: 0, cash: 0, up: { hp: 0, dmg: 0, spd: 0 }, charging: false, chargeAt: 0, flight: null, lastPc: 0, preYaw: 0, prePitch: 0, pull: null, portalUntil: 0, stunUntil: 0, altUntil: {}, jumpPrev: false,
       hp: MAX_HP, alive: false, spawned: false, weapon: loadout[0], ammo: WEAPONS.map((w) => w.mag),
       reloadUntil: 0, nextFire: 0, switchUntil: 0, scoped: false, aiming: false, scopeToggle: false, crouch: false, sprinting: false,
+      vehicle: null, car: null, lastVc: 0, robbing: 0,
       respawnAt: 0, killer: null, deadT: 0, prot: 0, lastSend: 0,
     };
     for (const p of welcome.players) this._addPlayer(p);
@@ -163,6 +165,7 @@ export class Game {
       : 'F / Entrée : tirer · Flèches : viser · 1-9 : armes · E / clic droit : tir secondaire · M : mini-carte', 10000);
     document.body.classList.add('ingame');
     document.body.classList.toggle('survival', this.mode === 'survival');
+    document.body.classList.toggle('heist', this.mode === 'heist');
     this._raf = requestAnimationFrame((t) => this._frame(t));
   }
 
@@ -179,7 +182,7 @@ export class Game {
     this.minimap.clear();
     this.input.enabled = false;
     this.input.reset();
-    document.body.classList.remove('ingame', 'survival');
+    document.body.classList.remove('ingame', 'survival', 'heist');
     this.hud.hide();
     document.getElementById('scope').classList.add('hidden');
     document.body.classList.remove('scoped', 'aiming');
@@ -265,6 +268,7 @@ export class Game {
         if (p.snaps.length > 30) p.snaps.shift();
         p.hp = hp; p.weapon = w; p.prot = prot; p.crouch = !!crouch;
       }
+      if (m.v) for (const [id, x, y, z, yaw] of m.v) this.fx.setVehicle(id, x, y, z, yaw);
     });
     n.on('spawn', (m) => this._onSpawn(m));
     n.on('shot', (m) => this._onRemoteShot(m));
@@ -346,6 +350,31 @@ export class Game {
         me.yaw = me.preYaw; me.pitch = me.prePitch;
         this.hud.hint(m.why === 'hit' ? 'Touché !' : m.why === 'wall' || m.why === 'ground' ? 'Avion écrasé' : 'Vol terminé', 1800);
       }
+    });
+    n.on('vehicleOn', (m) => { // on monte dans une voiture (mode Braquage)
+      const me = this.me;
+      if (!me) return;
+      me.vehicle = m.id;
+      me.car = { x: m.x, y: m.y, z: m.z, yaw: m.yaw, speed: 0 };
+      me.x = m.x; me.y = m.y; me.z = m.z; me.yaw = m.yaw;
+      me.scoped = false; me.aiming = false; me.crouch = false; me.sprinting = false;
+      sfx.play('plane');
+      this.hud.hint('Conduite : avancer/reculer + tourner · V : descendre', 4000);
+    });
+    n.on('vehicleOff', (m) => {
+      const me = this.me;
+      if (!me || !me.vehicle) return;
+      me.vehicle = null; me.car = null;
+      if (Number.isFinite(m?.x)) { me.x = m.x; me.y = m.y; me.z = m.z; me.yaw = m.yaw; }
+    });
+    n.on('heist', (m) => {
+      if (m.robbed !== undefined) {
+        this.hud.hint(m.robbed === this.myId ? `💰 Braquage réussi : +${m.amount} !` : `${m.name} a braqué la banque (+${m.amount})`, 3500);
+        if (m.robbed === this.myId) sfx.play('spawn');
+        if (this.me) this.me.robbing = 0;
+        return;
+      }
+      if (this.me) this.me.robbing = m.robbing ? m.left : 0;
     });
     n.on('boom', (m) => {
       this.fx.removeProj(m.id);
@@ -477,7 +506,7 @@ export class Game {
       me.alive = false; me.deadT = 0; me.hp = 0; me.killer = m.a;
       me.respawnAt = performance.now() + RESPAWN_MS;
       me.scoped = false; me.aiming = false; me.scopeToggle = false; me.crouch = false; me.sprinting = false;
-      me.charging = false; me.flight = null;
+      me.charging = false; me.flight = null; me.vehicle = null; me.car = null; me.robbing = 0;
       this.input.reset();
     } else {
       const v = this.players.get(m.v);
@@ -566,6 +595,18 @@ export class Game {
       me.reloadUntil = 0;
     }
     if (me.alive && inp.active) {
+      // --- monter / descendre de véhicule (mode Braquage) ---
+      if (inp.takeVehicle() && !me.flight) {
+        if (me.vehicle) this.net.send({ t: 'exit' });
+        else this.net.send({ t: 'enter' });
+      }
+      if (inp.takeShop()) {
+        if (this.mode === 'survival') this.onShop?.();
+        else if (this.mode === 'heist' && !me.vehicle) this.net.send({ t: 'rob' });
+      }
+
+      if (me.vehicle) { inp.takeWeapon(); inp.takeCycle(); inp.takeReload(); inp.takeNade(); }
+      else {
       // --- changement d'arme ---
       const slot = inp.takeWeapon();
       let want;
@@ -580,8 +621,13 @@ export class Game {
       // --- rechargement ---
       if (inp.takeReload()) this._startReload(now);
       if (inp.takeNade()) this._throwNade(now);
-      if (inp.takeShop() && this.mode === 'survival') this.onShop?.();
+      }
 
+      if (me.vehicle) {
+        // en conduite : pas de visée, d'accroupi ni de tir (comme en vol d'avion)
+        inp.takeScopeToggle(); inp.takeCrouchToggle(); inp.takeAlt(); inp.takeFirePress(now);
+        me.scoped = false; me.aiming = false; me.sprinting = false;
+      } else {
       // --- zoom sniper / visée précise (AR, carabine, minigun...) ---
       if (inp.takeScopeToggle()) me.scopeToggle = !me.scopeToggle;
       const wantScope = isTouch ? me.scopeToggle : inp.scopeHeld;
@@ -618,6 +664,7 @@ export class Game {
         inp.takeAlt();
         if (firing) this._tryFire(now);
       }
+      }
     } else {
       me.scoped = false; me.aiming = false; me.sprinting = false;
     }
@@ -625,7 +672,7 @@ export class Game {
     // --- déplacement ---
     let wx = 0, wz = 0;
     const active = me.alive && inp.active;
-    if (active && !me.flight) {
+    if (active && !me.flight && !me.vehicle) {
       const mx = inp.moveX, my = inp.moveY;
       const l = Math.hypot(mx, my);
       if (l > 0) {
@@ -665,12 +712,22 @@ export class Game {
         this.net.send({ t: 'pc', yaw: r(me.yaw), pitch: r(me.pitch) });
       }
     }
-    if (me.spawned) {
+    if (me.vehicle && me.car) { // voiture : mêmes touches que pour marcher (avancer/reculer, tourner), simulée localement
+      const throttle = active ? inp.moveY : 0;
+      const steer = active ? -inp.moveX : 0;
+      stepCar(me.car, dt, clamp(throttle, -1, 1), clamp(steer, -1, 1), this.map);
+      me.x = me.car.x; me.y = me.car.y; me.z = me.car.z; me.yaw = me.car.yaw;
+      if (now - me.lastVc >= TICK_MS) {
+        me.lastVc = now;
+        this.net.send({ t: 'vc', th: Math.round(throttle * 100) / 100, st: Math.round(steer * 100) / 100 });
+      }
+    }
+    if (me.spawned && !me.vehicle) {
       stepPlayer(me, dt, wx, wz, speed, jumpNow && !me.pull, this.map);
       if (me.y < -10) { me.y = 3; me.vy = 0; }
       this._checkPortals(now, wx, wz);
     }
-    if (me.alive) {
+    if (me.alive && !me.vehicle) {
       // envoi de la position au serveur (20 Hz)
       if (now - me.lastSend >= TICK_MS) {
         me.lastSend = now;
@@ -1008,6 +1065,15 @@ export class Game {
       this.viewmodel.update(dt, { speed: 0, onGround: true, reloadProgress: null, visible: false });
       return;
     }
+    if (me.vehicle && me.car) { // vue du conducteur
+      cam.position.set(me.car.x, me.car.y + 1.15, me.car.z);
+      cam.rotation.set(0, me.car.yaw, 0);
+      this._applyFov(false);
+      document.getElementById('scope').classList.add('hidden');
+      document.body.classList.remove('scoped', 'aiming');
+      this.viewmodel.update(dt, { speed: 0, onGround: true, reloadProgress: null, visible: false });
+      return;
+    }
     cam.position.set(me.x, eye, me.z);
     let sx = 0, sy = 0;
     if (this.shake > 0.001) {
@@ -1062,8 +1128,10 @@ export class Game {
     else if (cw.kind === 'plane') special = 'Un appui : lancer · souris : diriger · tir : abandonner';
     else if (cw.streak !== undefined) special = `Arme de série · un seul chargeur${cw.kind === 'nuke' ? ' · 1 missile' : ''}`;
     if (me.flight) special = `AVION EN PAPIER · ${Math.max(0, Math.ceil(PLANE.life - (now - me.flight.born) / 1000))} s · tir : abandonner`;
+    if (me.vehicle) special = 'EN VOITURE · avancer/reculer + tourner · V : descendre';
+    if (me.robbing) special = `BRAQUAGE EN COURS : ${Math.ceil(me.robbing / 1000)} s · ne pas s'éloigner`;
     this.hud.setSpecial(special);
-    this.hud.setCharge(me.charging ? clamp((now - me.chargeAt) / cw.charge, 0, 1) : null);
+    this.hud.setCharge(me.charging ? clamp((now - me.chargeAt) / cw.charge, 0, 1) : me.robbing ? clamp(1 - me.robbing / HEIST_ROB_MS, 0, 1) : null);
     if (this.nukeAt) this.hud.nukeCount(Math.max(0, (this.nukeAt - now) / 1000));
     if (this.gas) this.hud.gas(this.gas.owner === this.myId ? 'mask' : 'toxic', Math.max(0, (this.gas.until - now) / 1000));
 

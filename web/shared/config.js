@@ -41,6 +41,7 @@ export const MODES = {
   ffa: { id: 'ffa', label: 'Chacun pour soi', desc: 'Tous contre tous, 20 frags', max: 10, fill: 6, killLimit: 20, teams: false },
   survival: { id: 'survival', label: 'Survie', desc: 'Manches infinies contre des monstres, solo ou coop', max: 4, fill: 0, killLimit: 0, teams: true },
   gun: { id: 'gun', label: 'Gun Game', desc: 'Une arme par niveau, le couteau gagne', max: 10, fill: 6, killLimit: 0, teams: false },
+  heist: { id: 'heist', label: 'Braquage', desc: 'Policiers vs bandits : voitures, PNJ, banque à braquer', max: 10, fill: 6, killLimit: 0, teams: true },
 };
 
 // Gun Game : arme de chaque niveau (index dans WEAPONS). Un frag = niveau suivant ; tuer au dernier niveau = victoire.
@@ -199,6 +200,15 @@ export const CLASSES = {
 };
 export const CUSTOM_BUDGET = 10;       // points à dépenser pour une classe perso (coût de chaque arme : WEAPONS[i].cost)
 export const CUSTOM_MAX_WEAPONS = 5;
+
+export const HEIST_ROB_MS = 12000;   // durée du braquage de la banque (mode Braquage)
+
+// Mode Braquage : le rôle (et donc l'armement) dépend de l'équipe, pas d'un choix du joueur
+// (équipes déjà équilibrées auto entre humains et bots comme les autres modes équipe).
+export const HEIST_ROLES = {
+  blue: { id: 'police',  name: 'Policier', weapons: [W.REVOLVER, W.AR, W.KNIFE],     hp: 100, speed: 1 },
+  red:  { id: 'bandit',  name: 'Bandit',   weapons: [W.SHOTGUN, W.REVOLVER, W.KNIFE], hp: 100, speed: 1.05 },
+};
 
 export const weaponCost = (list) => list.reduce((s, i) => s + (WEAPONS[i]?.cost ?? 99), 0);
 

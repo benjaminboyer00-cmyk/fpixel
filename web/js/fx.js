@@ -1,6 +1,7 @@
 // Effets : traînées de balles et petits cubes qui giclent (impacts, sang pixelisé).
 import * as THREE from 'three';
-import { buildPlane } from './models.js';
+import { buildPlane, buildCar } from './models.js';
+import { angleLerp } from '../shared/util.js';
 
 const tracerGeo = new THREE.BoxGeometry(0.035, 0.035, 1);
 const partGeo = new THREE.BoxGeometry(0.1, 0.1, 0.1);
@@ -41,6 +42,7 @@ export class Fx {
     }
     this.wi = 0;
     this.planes = new Map();  // avions en papier des autres joueurs
+    this.vehicles = new Map(); // voitures du mode Braquage (id -> { m, tx, ty, tz, yaw })
     this.projs = new Map();  // roquettes / grenades en vol
     this.portals = new Map(); // "propriétaire:i" -> mesh
     this.fi = 0;
@@ -127,6 +129,28 @@ export class Fx {
     this.scene.remove(p.m);
     p.m.traverse((o) => { o.geometry?.dispose?.(); });
     this.planes.delete(id);
+  }
+
+  // Voiture du mode Braquage : persistante, on glisse vers la dernière position reçue (comme un avion)
+  setVehicle(id, x, y, z, yaw) {
+    let v = this.vehicles.get(id);
+    if (!v) {
+      const m = buildCar();
+      m.position.set(x, y, z);
+      m.rotation.y = yaw;
+      this.scene.add(m);
+      v = { m, tx: x, ty: y, tz: z, yaw };
+      this.vehicles.set(id, v);
+    }
+    v.tx = x; v.ty = y; v.tz = z; v.yaw = yaw;
+  }
+
+  removeVehicle(id) {
+    const v = this.vehicles.get(id);
+    if (!v) return;
+    this.scene.remove(v.m);
+    v.m.traverse((o) => { o.geometry?.dispose?.(); });
+    this.vehicles.delete(id);
   }
 
   removeProj(id) {
@@ -229,6 +253,10 @@ export class Fx {
       p.m.position.x += (p.tx - p.m.position.x) * k; p.m.position.y += (p.ty - p.m.position.y) * k; p.m.position.z += (p.tz - p.m.position.z) * k;
       p.m.rotation.set(p.pitch, p.yaw, 0);
     }
+    for (const v of this.vehicles.values()) {
+      v.m.position.x += (v.tx - v.m.position.x) * k; v.m.position.y += (v.ty - v.m.position.y) * k; v.m.position.z += (v.tz - v.m.position.z) * k;
+      v.m.rotation.y = angleLerp(v.m.rotation.y, v.yaw, k);
+    }
     const pulse = 0.75 + 0.2 * Math.sin(performance.now() / 120);
     for (const g of this.portals.values()) g.userData.inner.material.opacity = pulse;
     for (const m of this.parts) {
@@ -251,6 +279,7 @@ export class Fx {
     for (const m of this.waves) m.visible = false;
     for (const id of [...this.projs.keys()]) this.removeProj(id);
     for (const id of [...this.planes.keys()]) this.removePlane(id);
+    for (const id of [...this.vehicles.keys()]) this.removeVehicle(id);
     for (const k of [...this.portals.keys()]) this.removePortal(k);
   }
 }

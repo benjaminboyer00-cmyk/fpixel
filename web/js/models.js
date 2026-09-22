@@ -276,6 +276,18 @@ export function buildPlane() {
   return g;
 }
 
+// Voiture du mode Braquage (vue de l'extérieur) : avant vers -Z
+export function buildCar() {
+  const g = new THREE.Group();
+  g.add(box(1.8, 0.65, 4.2, '#c62d32', 0, 0.55, 0));           // carrosserie
+  g.add(box(1.6, 0.5, 2.0, '#cfd8e3', 0, 1.05, -0.3));         // habitacle vitré
+  g.add(box(1.85, 0.15, 4.3, '#20242a', 0, 0.2, 0));           // bas de caisse
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) g.add(box(0.4, 0.4, 0.4, '#161616', sx * 0.85, 0.2, sz * 1.5));
+  g.add(box(1.7, 0.12, 0.15, '#ffe9a0', 0, 0.55, -2.05));      // phares avant
+  g.add(box(1.7, 0.12, 0.15, '#e5484d', 0, 0.55, 2.05));       // feux arrière
+  return g;
+}
+
 export function makeNameSprite(name, color) {
   const c = document.createElement('canvas');
   c.width = 256; c.height = 64;

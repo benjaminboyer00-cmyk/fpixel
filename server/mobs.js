@@ -4,17 +4,19 @@
 import { stepPlayer } from '../web/js/physics.js';
 import { WALK_SPEED, W, EYE_HEIGHT } from '../web/shared/config.js';
 import { lookDir, clamp } from '../web/shared/util.js';
-import { canSee, flowDir } from './bots.js';
+import { canSee, flowDir, randomRoam } from './bots.js';
 
 // hp / speed (multiplicateur) / melee = { dmg, cd (ms), reach (m) } / weapon = arme à distance (index) avec pref = distance préférée et range = portée
 // err = imprécision de tir (rad), react = délai avant de tirer (ms), scale = taille, reward = points gagnés par le tueur
+// Ni melee ni weapon = PNJ civil (mode Braquage) : incapable de se battre, fuit les joueurs, sinon déambule.
 export const MOBS = {
-  zombie:  { name: 'Zombie',  hp: 60,   speed: 0.65, melee: { dmg: 14, cd: 900,  reach: 1.8 }, scale: 1.0, color: '#5f9a4a', reward: 10, sight: 45 },
-  runner:  { name: 'Coureur', hp: 35,   speed: 1.15, melee: { dmg: 10, cd: 600,  reach: 1.7 }, scale: 0.9, color: '#c98a3a', reward: 14, sight: 45 },
-  soldier: { name: 'Soldat',  hp: 70,   speed: 0.6,  weapon: W.AR,     pref: 12, range: 40, err: 0.06, react: 600, scale: 1.0, color: '#6a7a3a', reward: 22, sight: 70 },
-  brute:   { name: 'Brute',   hp: 380,  speed: 0.55, melee: { dmg: 38, cd: 1200, reach: 2.3 }, scale: 1.5, color: '#9a3a3a', reward: 70, sight: 45 },
-  sniper:  { name: 'Tireur',  hp: 60,   speed: 0.55, weapon: W.SNIPER, pref: 40, range: 90, err: 0.03, react: 900, scale: 1.0, color: '#3a5a9a', reward: 45, sight: 100 },
-  boss:    { name: 'Colosse', hp: 2400, speed: 0.5,  melee: { dmg: 60, cd: 1300, reach: 3.2 }, weapon: W.ROCKET, pref: 18, range: 60, err: 0.03, react: 800, scale: 2.0, color: '#7a2a8a', reward: 500, sight: 90 },
+  zombie:   { name: 'Zombie',  hp: 60,   speed: 0.65, melee: { dmg: 14, cd: 900,  reach: 1.8 }, scale: 1.0, color: '#5f9a4a', reward: 10, sight: 45 },
+  runner:   { name: 'Coureur', hp: 35,   speed: 1.15, melee: { dmg: 10, cd: 600,  reach: 1.7 }, scale: 0.9, color: '#c98a3a', reward: 14, sight: 45 },
+  soldier:  { name: 'Soldat',  hp: 70,   speed: 0.6,  weapon: W.AR,     pref: 12, range: 40, err: 0.06, react: 600, scale: 1.0, color: '#6a7a3a', reward: 22, sight: 70 },
+  brute:    { name: 'Brute',   hp: 380,  speed: 0.55, melee: { dmg: 38, cd: 1200, reach: 2.3 }, scale: 1.5, color: '#9a3a3a', reward: 70, sight: 45 },
+  sniper:   { name: 'Tireur',  hp: 60,   speed: 0.55, weapon: W.SNIPER, pref: 40, range: 90, err: 0.03, react: 900, scale: 1.0, color: '#3a5a9a', reward: 45, sight: 100 },
+  boss:     { name: 'Colosse', hp: 2400, speed: 0.5,  melee: { dmg: 60, cd: 1300, reach: 3.2 }, weapon: W.ROCKET, pref: 18, range: 60, err: 0.03, react: 800, scale: 2.0, color: '#7a2a8a', reward: 500, sight: 90 },
+  civilian: { name: 'Civil',   hp: 20,   speed: 0.55, scale: 1.0, color: '#c9b48a', reward: 0, sight: 26 },
 };
 
 // Réglages de difficulté choisis à la création du salon (les bots « easy / normal / hard » du menu)
@@ -50,7 +52,11 @@ export function waveList(wave, humans) {
 }
 
 export function newMobState(def) {
-  return { nextSee: 0, sees: false, seenAt: 0, wasSees: false, strafe: 1, strafeUntil: 0, burstLeft: 3, pause: 0, lastCheck: 0, lastPos: { x: 0, z: 0 }, react: (def.react || 0) * (0.8 + Math.random() * 0.4) };
+  return {
+    nextSee: 0, sees: false, seenAt: 0, wasSees: false, strafe: 1, strafeUntil: 0, burstLeft: 3, pause: 0, lastCheck: 0, lastPos: { x: 0, z: 0 },
+    react: (def.react || 0) * (0.8 + Math.random() * 0.4),
+    roam: null, roamUntil: 0,   // civils : point de déambulation
+  };
 }
 
 function angDiff(a, b) {
@@ -80,12 +86,21 @@ export function mobStep(room, m, now, dt) {
   }
 
   let mvx = 0, mvz = 0, jump = false, fire = null, melee = null;
-  const desYaw = Math.atan2(-dx, -dz);
+  let desYaw = Math.atan2(-dx, -dz);
   const desPitch = Math.atan2(t.y + 1.1 - (m.y + EYE_HEIGHT), Math.max(d, 0.1));
   const follow = () => { const f = flowDir(map, room.flow, m.x, m.z); if (f) { mvx = f.x; mvz = f.z; } else { mvx = ux; mvz = uz; } };
 
+  const unarmed = !def.melee && !def.weapon;
   const reach = def.melee ? def.melee.reach : 0;
-  if (def.melee && d <= reach && Math.abs(t.y - m.y) < 2.2) {
+  if (unarmed) {
+    if (d < def.sight * 0.6 && st.sees) {
+      mvx = -ux; mvz = -uz;                                         // civil : fuit le joueur le plus proche
+    } else {
+      if (!st.roam || Math.hypot(st.roam.x - m.x, st.roam.z - m.z) < 2 || now > st.roamUntil) { st.roam = randomRoam(map, m); st.roamUntil = now + 15000; }
+      if (st.roam) { const rx = st.roam.x - m.x, rz = st.roam.z - m.z, rl = Math.hypot(rx, rz) || 1; mvx = rx / rl; mvz = rz / rl; }
+    }
+    if (mvx || mvz) desYaw = Math.atan2(-mvx, -mvz);                 // fait face à la direction de déplacement, pas à la menace
+  } else if (def.melee && d <= reach && Math.abs(t.y - m.y) < 2.2) {
     melee = t;                                                    // à portée : on frappe (cooldown géré par la salle)
   } else if (def.weapon && st.sees && d <= def.range) {
     const fwd = d > def.pref * 1.2 ? 1 : d < def.pref * 0.6 ? -1 : 0;

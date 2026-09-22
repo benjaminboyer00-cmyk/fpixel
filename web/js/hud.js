@@ -3,6 +3,8 @@ import { WEAPONS, TEAM_COLORS, FFA_COLORS, MODES, GUN_ORDER, NADE_MAX } from '..
 
 const $ = (id) => document.getElementById(id);
 const teamName = { red: 'ROUGE', blue: 'BLEU' };
+const HEIST_TEAM_NAME = { red: 'BANDIT', blue: 'POLICIER' };
+const teamLabel = (mode, team) => (mode === 'heist' ? HEIST_TEAM_NAME[team] : teamName[team]);
 
 export function playerColor(mode, p) {
   if (p.team) return TEAM_COLORS[p.team];
@@ -217,9 +219,11 @@ export class Hud {
     const line = $('score-line'), sub = $('score-sub');
     if (MODES[mode].teams) {
       line.replaceChildren(
-        el('span', { textContent: `ROUGE ${teamKills.red}`, style: `color:${'#ff6b70'}` }), ' — ',
-        el('span', { textContent: `${teamKills.blue} BLEU`, style: `color:${'#6ea0ff'}` }));
-      sub.textContent = `Premier à ${limit} frags${me?.team ? ` · tu es ${teamName[me.team]}` : ''}`;
+        el('span', { textContent: `${teamLabel(mode, 'red')} ${teamKills.red}`, style: `color:${'#ff6b70'}` }), ' — ',
+        el('span', { textContent: `${teamKills.blue} ${teamLabel(mode, 'blue')}`, style: `color:${'#6ea0ff'}` }));
+      sub.textContent = mode === 'heist'
+        ? `${me?.team ? `Tu es ${teamLabel(mode, me.team)}` : ''} · voiture (V) · banque à braquer (B)`
+        : `Premier à ${limit} frags${me?.team ? ` · tu es ${teamLabel(mode, me.team)}` : ''}`;
     } else if (mode === 'gun') {
       const lvl = me?.lvl ?? 0;
       line.textContent = `Niveau ${lvl + 1}/${GUN_ORDER.length} · ${WEAPONS[GUN_ORDER[lvl]].name}`;
@@ -264,8 +268,8 @@ export class Hud {
     };
     if (MODES[mode].teams && mode !== 'survival') {
       box.replaceChildren(
-        table(players.filter((p) => p.team === 'red'), `ÉQUIPE ROUGE — ${teamKills.red}`, TEAM_COLORS.red),
-        table(players.filter((p) => p.team === 'blue'), `ÉQUIPE BLEUE — ${teamKills.blue}`, TEAM_COLORS.blue));
+        table(players.filter((p) => p.team === 'red'), `${teamLabel(mode, 'red')}S — ${teamKills.red}`, TEAM_COLORS.red),
+        table(players.filter((p) => p.team === 'blue'), `${teamLabel(mode, 'blue')}S — ${teamKills.blue}`, TEAM_COLORS.blue));
     } else {
       box.replaceChildren(table(players, MODES[mode].label, '#fff'));
     }

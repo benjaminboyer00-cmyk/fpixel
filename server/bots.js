@@ -308,7 +308,7 @@ function pathDir(map, b, ai, goal, now) {
   return { x: dx / l, z: dz / l };
 }
 
-function randomRoam(map, b) {
+export function randomRoam(map, b) {
   const g = gridFor(map);
   if (!g.roam.length) return null;
   for (let k = 0; k < 6; k++) {                       // on préfère un point assez loin
@@ -354,7 +354,7 @@ export function canSee(b, t, sight, boxes) {
 function pickTarget(room, b, now) {
   let best = null, bestD = Infinity;
   for (const q of room.players.values()) {
-    if (q === b || !q.alive || now < q.protectUntil) continue;
+    if (q === b || !q.alive || now < q.protectUntil || q.civilian) continue;
     if (room.cfg.teams && q.team === b.team) continue;
     const d = Math.hypot(q.x - b.x, q.z - b.z);
     if (d < bestD && canSee(b, q, b.ai.sight, room.map.boxes)) { best = q; bestD = d; }

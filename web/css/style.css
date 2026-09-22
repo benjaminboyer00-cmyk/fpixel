@@ -180,6 +180,7 @@ body.aiming #crosshair i:nth-child(4) { width: 6px; left: 3px; }
 #t-reload { right: calc(max(24px, env(safe-area-inset-right)) + 12px); bottom: calc(max(24px, env(safe-area-inset-bottom)) + 112px); width: 58px; height: 58px; font-size: 16px; }
 #t-scope { right: calc(max(24px, env(safe-area-inset-right)) + 84px); bottom: calc(max(24px, env(safe-area-inset-bottom)) + 92px); width: 58px; height: 58px; font-size: 11px; }
 #t-crouch { left: max(10px, env(safe-area-inset-left)); top: 40%; width: 52px; height: 52px; font-size: 10px; }
+#t-car { left: max(10px, env(safe-area-inset-left)); top: calc(40% + 62px); width: 52px; height: 52px; font-size: 22px; }
 .tbtn.small { width: 40px; height: 40px; font-size: 16px; border-radius: 8px; top: max(8px, env(safe-area-inset-top)); }
 #t-pause { right: max(8px, env(safe-area-inset-right)); }
 #t-score { right: calc(max(8px, env(safe-area-inset-right)) + 48px); }
@@ -282,4 +283,6 @@ body.touch #ammo { font-size: 22px; }
 .shop-row button:disabled { opacity: .35; cursor: default; }
 .shop-row.own { opacity: .6; }
 #t-shop { display: none; }
-body.survival #t-shop { display: block; }
+body.survival #t-shop, body.heist #t-shop { display: block; }
+#t-car { display: none; }
+body.heist #t-car { display: flex; align-items: center; justify-content: center; }

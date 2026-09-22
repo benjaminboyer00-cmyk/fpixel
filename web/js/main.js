@@ -71,13 +71,13 @@ if (!MODES[settings.mode]) settings.mode = 'ffa';
 function selectMode(m) {
   settings.mode = m;
   document.querySelectorAll('.mode').forEach((b) => b.classList.toggle('sel', b.dataset.mode === m));
-  $('f-class').classList.toggle('off', m === 'gun' || m === 'survival'); // Gun Game : armes imposées par le niveau ; survie : armes achetées en boutique
+  $('f-class').classList.toggle('off', m === 'gun' || m === 'survival' || m === 'heist'); // armes imposées : niveau (Gun Game), boutique (survie) ou rôle (Braquage)
   const surv = m === 'survival';
   document.querySelector('.f-bots').classList.toggle('hidden', surv);
   document.querySelector('.f-room').firstChild.textContent = surv ? 'Salon coop ' : 'Salon privé ';
   const opt = { easy: surv ? 'Monstres faibles' : 'Bots faciles', normal: surv ? 'Monstres normaux' : 'Bots normaux', hard: surv ? 'Monstres coriaces' : 'Bots difficiles' };
   for (const o of $('diff').options) o.textContent = opt[o.value];
-  if (surv && settings.map === 'arena' && $('map')) { settings.map = 'city'; $('map').value = 'city'; $('map-desc').textContent = MAPS.city.desc; }
+  if ((surv || m === 'heist') && settings.map === 'arena' && $('map')) { settings.map = 'city'; $('map').value = 'city'; $('map-desc').textContent = MAPS.city.desc; }
   saveSettings(settings);
 }
 document.querySelectorAll('.mode').forEach((b) => b.addEventListener('click', () => selectMode(b.dataset.mode)));
