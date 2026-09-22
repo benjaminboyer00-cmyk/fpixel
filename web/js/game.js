@@ -374,6 +374,11 @@ export class Game {
         if (this.me) this.me.robbing = 0;
         return;
       }
+      if (m.fail) {
+        const txt = { nobank: 'Pas de banque sur cette carte', notbandit: 'Seuls les bandits peuvent braquer', busy: 'Quelqu\'un braque déjà la banque', far: 'Trop loin de la banque' }[m.fail] || 'Braquage impossible';
+        this.hud.hint(txt, 2000);
+        return;
+      }
       if (this.me) this.me.robbing = m.robbing ? m.left : 0;
     });
     n.on('boom', (m) => {

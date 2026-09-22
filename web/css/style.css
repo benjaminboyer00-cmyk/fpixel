@@ -51,7 +51,7 @@ input[type="text"]:focus { border-color: var(--accent); }
 
 .f-loadout { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 4px; }
 .f-loadout select, .f-class select { display: block; width: 100%; margin-top: 5px; }
-.f-class.off { opacity: .45; pointer-events: none; }
+.f-class.off, .f-map.off { opacity: .45; pointer-events: none; }
 .f-class.off #cls-picker::after { content: 'Gun Game : armes imposées'; display: block; font-size: 11px; text-transform: none; letter-spacing: 0; margin-top: 4px; }
 .cls-desc { margin-top: 4px; font-size: 11px; text-transform: none; letter-spacing: 0; color: var(--dim); min-height: 1.3em; }
 .cls-custom { margin-top: 6px; display: grid; gap: 2px; max-height: 190px; overflow: auto; padding: 6px 8px; background: #0e1218; border: 2px solid var(--line); text-transform: none; letter-spacing: 0; }

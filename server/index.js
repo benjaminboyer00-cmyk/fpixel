@@ -149,7 +149,7 @@ function parseOpts(m) {
     bots,
     diff: DIFF_IDS.includes(m.diff) ? m.diff : 'normal',
     limit: clamp(Math.round(Number(m.limit)) || 0, 0, 200),
-    map: MAPS[m.map] ? m.map : 'arena',
+    map: m.mode === 'heist' ? 'city' : MAPS[m.map] ? m.map : 'arena',   // voitures/banque uniquement sur Quartier
   };
 }
 const optsKey = (o) => `${o.bots}|${o.diff}|${o.limit}|${o.map}`;
@@ -176,7 +176,7 @@ function findRoom(mode, name, opts) {
 
 function createRoom(id, mode, name, opts) {
   const cfg = MODES[mode];
-  const map = mapById(opts.map);
+  const map = mode === 'heist' ? mapById('city') : mapById(opts.map);   // voitures/banque uniquement sur Quartier
   const room = {
     id, mode, name, cfg, auto: false,
     fill: mode === 'survival' || opts.bots === 0 ? 0 : opts.bots === 1 ? cfg.fill : Math.min(opts.bots, cfg.max), // joueurs visés (humains + bots)
@@ -840,7 +840,7 @@ function stepHeist(room, now) {
   const humans = [...room.players.values()].filter((p) => !p.bot && !p.away);
   if (humans.length) {
     const civAlive = [...room.players.values()].filter((p) => p.civilian).length;
-    const target = Math.min(16, 6 + humans.length * 2);
+    const target = Math.min(10, 4 + humans.length * 2);
     if (civAlive < target && Math.random() < 0.4) spawnCivilian(room, now);
   }
   const bank = room.bank;
@@ -1360,9 +1360,13 @@ function handleMessage(ws, raw) {
     if (car) { car.wantThrottle = clamp(Number.isFinite(+m.th) ? +m.th : 0, -1, 1); car.wantSteer = clamp(Number.isFinite(+m.st) ? +m.st : 0, -1, 1); }
   } else if (m.t === 'rob') {            // banque (mode Braquage) : seuls les bandits (équipe rouge) peuvent braquer
     const room = p.room, bank = room.bank;
-    if (room.mode !== 'heist' || !bank || !p.alive || p.team !== 'red') return;
+    if (room.mode !== 'heist' || !p.alive) return;
+    const fail = (why) => send(p, { t: 'heist', fail: why });
+    if (!bank) return fail('nobank');
     if (bank.robbing === p.id) { bank.robbing = null; send(p, { t: 'heist', robbing: false }); return; }
-    if (bank.robbing || Math.hypot(p.x - bank.x, p.z - bank.z) > 5) return;
+    if (p.team !== 'red') return fail('notbandit');
+    if (bank.robbing) return fail('busy');
+    if (Math.hypot(p.x - bank.x, p.z - bank.z) > 5) return fail('far');
     bank.robbing = p.id; bank.since = now;
     send(p, { t: 'heist', robbing: true, left: HEIST_ROB });
   }

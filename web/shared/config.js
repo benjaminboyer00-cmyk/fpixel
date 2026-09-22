@@ -41,7 +41,7 @@ export const MODES = {
   ffa: { id: 'ffa', label: 'Chacun pour soi', desc: 'Tous contre tous, 20 frags', max: 10, fill: 6, killLimit: 20, teams: false },
   survival: { id: 'survival', label: 'Survie', desc: 'Manches infinies contre des monstres, solo ou coop', max: 4, fill: 0, killLimit: 0, teams: true },
   gun: { id: 'gun', label: 'Gun Game', desc: 'Une arme par niveau, le couteau gagne', max: 10, fill: 6, killLimit: 0, teams: false },
-  heist: { id: 'heist', label: 'Braquage', desc: 'Policiers vs bandits : voitures, PNJ, banque à braquer', max: 10, fill: 6, killLimit: 0, teams: true },
+  heist: { id: 'heist', label: 'Braquage', desc: 'Policiers vs bandits : voitures, PNJ, banque à braquer', max: 10, fill: 4, killLimit: 0, teams: true },
 };
 
 // Gun Game : arme de chaque niveau (index dans WEAPONS). Un frag = niveau suivant ; tuer au dernier niveau = victoire.
