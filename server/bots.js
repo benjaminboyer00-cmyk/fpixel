@@ -354,7 +354,7 @@ export function canSee(b, t, sight, boxes) {
 function pickTarget(room, b, now) {
   let best = null, bestD = Infinity;
   for (const q of room.players.values()) {
-    if (q === b || !q.alive || now < q.protectUntil || q.civilian) continue;
+    if (q === b || !q.alive || now < q.protectUntil) continue;
     if (room.cfg.teams && q.team === b.team) continue;
     const d = Math.hypot(q.x - b.x, q.z - b.z);
     if (d < bestD && canSee(b, q, b.ai.sight, room.map.boxes)) { best = q; bestD = d; }

@@ -3,8 +3,7 @@ import { WEAPONS, TEAM_COLORS, FFA_COLORS, MODES, GUN_ORDER, NADE_MAX } from '..
 
 const $ = (id) => document.getElementById(id);
 const teamName = { red: 'ROUGE', blue: 'BLEU' };
-const HEIST_TEAM_NAME = { red: 'BANDIT', blue: 'POLICIER' };
-const teamLabel = (mode, team) => (mode === 'heist' ? HEIST_TEAM_NAME[team] : teamName[team]);
+const teamLabel = (mode, team) => teamName[team];
 
 export function playerColor(mode, p) {
   if (p.team) return TEAM_COLORS[p.team];
@@ -221,9 +220,7 @@ export class Hud {
       line.replaceChildren(
         el('span', { textContent: `${teamLabel(mode, 'red')} ${teamKills.red}`, style: `color:${'#ff6b70'}` }), ' — ',
         el('span', { textContent: `${teamKills.blue} ${teamLabel(mode, 'blue')}`, style: `color:${'#6ea0ff'}` }));
-      sub.textContent = mode === 'heist'
-        ? `${me?.team ? `Tu es ${teamLabel(mode, me.team)}` : ''} · voiture (V) · banque à braquer (B)`
-        : `Premier à ${limit} frags${me?.team ? ` · tu es ${teamLabel(mode, me.team)}` : ''}`;
+      sub.textContent = `Premier à ${limit} frags${me?.team ? ` · tu es ${teamLabel(mode, me.team)}` : ''}`;
     } else if (mode === 'gun') {
       const lvl = me?.lvl ?? 0;
       line.textContent = `Niveau ${lvl + 1}/${GUN_ORDER.length} · ${WEAPONS[GUN_ORDER[lvl]].name}`;

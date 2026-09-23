@@ -12,20 +12,18 @@ import {
   TICK_MS, REWIND_MAX_MS, MAX_RAY, EYE_HEIGHT, MAX_HP, RESPAWN_MS, SPAWN_PROTECT_MS,
   REGEN_DELAY_MS, REGEN_PER_S, END_SCREEN_MS, BODY_HALF, BODY_TOP, HEAD_HALF, HEAD_TOP, BODY_TOP_CROUCH, HEAD_TOP_CROUCH,
   MODES, WEAPONS, GUN_ORDER, KNIFE, CLASSES, resolveClass, W, STREAK_WEAPONS, STREAK_AT, NUKE_GAS_MS, NUKE_GAS_DPS, NADE_MAX, NADE_REGEN_MS, SURV, shopItem, shopPrice,
-  MYSTERY_POOL, MYSTERY_RARE, MYSTERY_RARE_CHANCE, HEIST_ROLES, HEIST_ROB_MS,
+  MYSTERY_POOL, MYSTERY_RARE, MYSTERY_RARE_CHANCE,
 } from '../web/shared/config.js';
 import { MAPS, mapById } from '../web/shared/map.js';
 import { rayAABB, applySpread, mulberry32, clamp } from '../web/shared/util.js';
 import { BOT_NAMES, newBotAI, botStep, botClass, computeFlow } from './bots.js';
 import { MOBS, mobPower, waveList, newMobState, mobStep } from './mobs.js';
 import { stepPlane, PLANE } from '../web/shared/plane.js';
-import { stepCar, CAR } from '../web/shared/vehicle.js';
 
 // Survie : réglages surchargeables (tests) — durées de préparation / de fin de partie, argent de départ, vitesse des monstres
 const SURV_T = { first: Number(process.env.SURV_FIRST_PREP_MS) || SURV.FIRST_PREP_MS, prep: Number(process.env.SURV_PREP_MS) || SURV.PREP_MS, over: Number(process.env.SURV_OVER_MS) || SURV.OVER_MS };
 const SURV_CASH = process.env.SURV_START_CASH !== undefined ? Number(process.env.SURV_START_CASH) : SURV.START_CASH;
 const MOB_SPEED = Number(process.env.SURV_MOB_SPEED) || 1;
-const HEIST_ROB = Number(process.env.HEIST_ROB_MS) || HEIST_ROB_MS;   // durée du braquage de la banque
 
 const STREAKS = process.env.STREAKS ? process.env.STREAKS.split(',').map(Number) : STREAK_AT; // kills d'affilée pour le laser, le lance-flammes, le missile
 
@@ -149,7 +147,7 @@ function parseOpts(m) {
     bots,
     diff: DIFF_IDS.includes(m.diff) ? m.diff : 'normal',
     limit: clamp(Math.round(Number(m.limit)) || 0, 0, 200),
-    map: m.mode === 'heist' ? 'city' : MAPS[m.map] ? m.map : 'arena',   // voitures/banque uniquement sur Quartier
+    map: MAPS[m.map] ? m.map : 'arena',
   };
 }
 const optsKey = (o) => `${o.bots}|${o.diff}|${o.limit}|${o.map}`;
@@ -176,7 +174,7 @@ function findRoom(mode, name, opts) {
 
 function createRoom(id, mode, name, opts) {
   const cfg = MODES[mode];
-  const map = mode === 'heist' ? mapById('city') : mapById(opts.map);   // voitures/banque uniquement sur Quartier
+  const map = mapById(opts.map);
   const room = {
     id, mode, name, cfg, auto: false,
     fill: mode === 'survival' || opts.bots === 0 ? 0 : opts.bots === 1 ? cfg.fill : Math.min(opts.bots, cfg.max), // joueurs visés (humains + bots)
@@ -193,10 +191,6 @@ function createRoom(id, mode, name, opts) {
     flow: null, flowAt: 0, flowKey: '',   // champ de flux des monstres (survie)
     nuke: null,                    // missile nucléaire en vol : { owner, at }
     gas: null,                     // gaz toxique après le missile : { owner, until }
-    // ---- mode Braquage ----
-    vehicles: mode === 'heist' ? (map.carSpawns || []).map((s, i) => ({ id: i + 1, x: s.x, y: 0, z: s.z, yaw: s.yaw, speed: 0, driver: null })) : [],
-    bank: mode === 'heist' && map.bank ? { x: map.bank.x, z: map.bank.z, robbing: null, since: 0 } : null,
-    civTarget: 0,                  // quota de PNJ civils en vadrouille (mode Braquage)
   };
   rooms.set(id, room);
   return room;
@@ -245,7 +239,6 @@ function newPlayer(room, id, ws, name, team) {
     nades: 0, nadeReady: 0, nadeRegenAt: 0, st: newStats(), chargeAt: 0,
     cash: 0, owned: [], up: { hp: 0, dmg: 0, spd: 0 }, dmgMul: 1, mob: null, mst: null, scale: 1, nextAtk: 0,   // survie
     respawnAt: 0, protectUntil: 0, lastDamage: 0, nextFire: 0, crouch: false,
-    civilian: false, vehicle: null,   // mode Braquage
     hist: [],
   };
 }
@@ -385,10 +378,7 @@ function applyClass(room, p) {
   if (p.bot && room.mode !== 'gun') p.pending = botClass(p.ai.diff);   // les bots changent de classe à chaque réapparition
   if (p.pending) { p.cls = p.pending; p.pending = null; }
   if (room.mode === 'gun') { p.loadout = [GUN_ORDER[shownLevel(p)], KNIFE]; p.maxHp = MAX_HP; p.speedMul = 1; }
-  else if (room.mode === 'heist') { // le rôle (policier / bandit) suit l'équipe, déjà équilibrée entre humains et bots
-    const role = HEIST_ROLES[p.team] || HEIST_ROLES.blue;
-    p.loadout = role.weapons.slice(); p.maxHp = role.hp; p.speedMul = role.speed;
-  } else { p.loadout = p.cls.weapons.slice(); p.maxHp = p.cls.hp; p.speedMul = p.cls.speed; }
+  else { p.loadout = p.cls.weapons.slice(); p.maxHp = p.cls.hp; p.speedMul = p.cls.speed; }
   p.streakAmmo = {};
   if (!p.loadout.includes(p.weapon)) p.weapon = p.loadout[0];
 }
@@ -689,33 +679,6 @@ function stepPlanes(room, now, dt) {
   }
 }
 
-// ============================================================== VÉHICULES ====
-// Voitures du mode Braquage : persistantes (pas détruites comme un avion), un joueur monte/descend.
-// Tant qu'il conduit, sa position (utilisée pour les dégâts, la mini-carte, etc.) suit la voiture.
-function exitVehicle(p, car) {
-  if (car) {
-    car.driver = null; car.wantThrottle = 0; car.wantSteer = 0;
-    const ox = Math.sin(car.yaw + Math.PI / 2), oz = Math.cos(car.yaw + Math.PI / 2);
-    p.x = car.x + ox * 2.4; p.z = car.z + oz * 2.4; p.y = 0;
-  }
-  p.vehicle = null;
-}
-
-function stepVehicles(room, now, dt) {
-  if (!room.vehicles.length) return;
-  for (const car of room.vehicles) {
-    if (!car.driver) continue;
-    const p = room.players.get(car.driver);
-    if (!p || !p.alive || p.away || room.state === 'ended') {
-      car.driver = null; car.wantThrottle = 0; car.wantSteer = 0;
-      if (p) p.vehicle = null;
-      continue;
-    }
-    stepCar(car, dt, car.wantThrottle || 0, car.wantSteer || 0, room.map);
-    p.x = car.x; p.y = car.y; p.z = car.z; p.yaw = car.yaw;
-  }
-}
-
 // ================================================================ SURVIE ====
 const sendCash = (p) => send(p, { t: 'cash', n: p.cash, up: p.up, owned: p.owned });
 
@@ -810,57 +773,6 @@ function stepSurvival(room, now) {
   }
   if (now - S.lastSent > 500) { S.lastSent = now; broadcast(room, survMsg(room)); }
   if (live) ensureFlow(room, now, humans);
-}
-
-// PNJ civil (mode Braquage) : même patron que spawnMob, mais sans manche/récompense et dispersé sur toute la carte
-function spawnCivilian(room, now) {
-  const def = MOBS.civilian;
-  const spots = room.map.spawns;
-  const at = spots[(Math.random() * spots.length) | 0];
-  const id = nextPlayerId++;
-  const p = newPlayer(room, id, null, def.name, null);
-  p.bot = true; p.civilian = true;
-  p.mob = { type: 'civilian', dmg: 0, reward: 0, scale: def.scale, color: def.color };
-  p.mst = newMobState(def);
-  p.maxHp = def.hp; p.hp = p.maxHp;
-  p.speedMul = def.speed;
-  p.scale = def.scale;
-  p.weapon = KNIFE; p.loadout = [KNIFE];
-  p.x = at.x + (Math.random() - 0.5) * 8; p.z = at.z + (Math.random() - 0.5) * 8; p.y = 0;
-  p.yaw = Math.random() * Math.PI * 2;
-  p.alive = true; p.protectUntil = now + 300; p.hist = [];
-  room.players.set(id, p);
-  broadcast(room, { t: 'pjoin', p: publicPlayer(p) });
-}
-
-// Mode Braquage : population de PNJ civils + minuterie du braquage de la banque
-function stepHeist(room, now) {
-  if (room.mode !== 'heist') return;
-  for (const p of [...room.players.values()]) if (p.civilian && !p.alive) dropPlayer(room, p);   // les civils morts disparaissent
-  const humans = [...room.players.values()].filter((p) => !p.bot && !p.away);
-  if (humans.length) {
-    const civAlive = [...room.players.values()].filter((p) => p.civilian).length;
-    const target = Math.min(10, 4 + humans.length * 2);
-    if (civAlive < target && Math.random() < 0.4) spawnCivilian(room, now);
-  }
-  const bank = room.bank;
-  if (!bank || !bank.robbing) return;
-  const p = room.players.get(bank.robbing);
-  if (!p || !p.alive || p.away || Math.hypot(p.x - bank.x, p.z - bank.z) > 5) {
-    if (p) send(p, { t: 'heist', robbing: false });
-    bank.robbing = null;
-    return;
-  }
-  const left = HEIST_ROB - (now - bank.since);
-  if (left <= 0) {
-    const reward = 400 + ((Math.random() * 300) | 0);
-    p.cash += reward;
-    bank.robbing = null;
-    broadcast(room, { t: 'heist', robbed: p.id, name: p.name, amount: reward });
-    sendCash(p);
-  } else {
-    send(p, { t: 'heist', robbing: true, left: Math.round(left) });
-  }
 }
 
 // Achat à la boutique (survie) : arme, soins, grenades ou amélioration
@@ -1216,7 +1128,7 @@ function applyDamage(room, atk, vic, amount, head, wi, now) {
 }
 
 function checkWin(room, lastKiller, now) {
-  if (room.mode === 'survival' || room.mode === 'heist') return;   // sandbox sans fin, comme la survie
+  if (room.mode === 'survival') return;   // sandbox sans fin
   const limit = room.killLimit;
   let winner = null;
   if (room.cfg.teams) {
@@ -1307,7 +1219,7 @@ function handleMessage(ws, raw) {
   }
 
   if (m.t === 'in') {
-    if (!p.alive || now < p.stunUntil || p.vehicle) return;   // en conduite : la position suit la voiture (stepVehicles)
+    if (!p.alive || now < p.stunUntil) return;
     const x = +m.x, y = +m.y, z = +m.z;
     if (!Number.isFinite(x + y + z)) return;
     const half = p.room.map.half;
@@ -1336,39 +1248,6 @@ function handleMessage(ws, raw) {
     if (pl && Number.isFinite(+m.yaw) && Number.isFinite(+m.pitch)) { pl.wantYaw = +m.yaw; pl.wantPitch = clamp(+m.pitch, -1, 1); }
   } else if (m.t === 'pcancel') {
     endPlane(p.room, p.id, 'cancel');
-  } else if (m.t === 'enter') {          // monter dans la voiture la plus proche (mode Braquage)
-    const room = p.room;
-    if (room.mode !== 'heist' || !p.alive || p.vehicle) return;
-    let best = null, bestD = CAR.enterRadius;
-    for (const c of room.vehicles) {
-      if (c.driver) continue;
-      const dd = Math.hypot(p.x - c.x, p.z - c.z);
-      if (dd < bestD) { bestD = dd; best = c; }
-    }
-    if (!best) return;
-    best.driver = p.id; best.wantThrottle = 0; best.wantSteer = 0;
-    p.vehicle = best.id;
-    if (p.chargeAt) { p.chargeAt = 0; broadcast(room, { t: 'charge', id: p.id, on: 0 }, p); }
-    send(p, { t: 'vehicleOn', id: best.id, x: r2(best.x), y: r2(best.y), z: r2(best.z), yaw: r2(best.yaw) });
-  } else if (m.t === 'exit') {           // descendre de la voiture
-    if (!p.vehicle) return;
-    const car = p.room.vehicles.find((c) => c.id === p.vehicle);
-    exitVehicle(p, car);
-    send(p, { t: 'vehicleOff' });
-  } else if (m.t === 'vc') {             // conduite : accélérateur / volant voulus
-    const car = p.room.vehicles.find((c) => c.id === p.vehicle);
-    if (car) { car.wantThrottle = clamp(Number.isFinite(+m.th) ? +m.th : 0, -1, 1); car.wantSteer = clamp(Number.isFinite(+m.st) ? +m.st : 0, -1, 1); }
-  } else if (m.t === 'rob') {            // banque (mode Braquage) : seuls les bandits (équipe rouge) peuvent braquer
-    const room = p.room, bank = room.bank;
-    if (room.mode !== 'heist' || !p.alive) return;
-    const fail = (why) => send(p, { t: 'heist', fail: why });
-    if (!bank) return fail('nobank');
-    if (bank.robbing === p.id) { bank.robbing = null; send(p, { t: 'heist', robbing: false }); return; }
-    if (p.team !== 'red') return fail('notbandit');
-    if (bank.robbing) return fail('busy');
-    if (Math.hypot(p.x - bank.x, p.z - bank.z) > 5) return fail('far');
-    bank.robbing = p.id; bank.since = now;
-    send(p, { t: 'heist', robbing: true, left: HEIST_ROB });
   }
 }
 
@@ -1414,14 +1293,11 @@ setInterval(() => {
       snap.push([p.id, r2(p.x), r2(p.y), r2(p.z), r2(p.yaw), r2(p.pitch), Math.ceil(p.hp), p.weapon, p.alive && now < p.protectUntil ? 1 : 0, p.crouch ? 1 : 0]);
     }
     stepSurvival(room, now);
-    stepHeist(room, now);
     stepProjectiles(room, now, TICK_MS / 1000);
     stepPlanes(room, now, TICK_MS / 1000);
-    stepVehicles(room, now, TICK_MS / 1000);
     if (room.nuke && now >= room.nuke.at && room.state === 'playing') detonateNuke(room, now);
     stepGas(room, now, TICK_MS / 1000);
-    const veh = room.vehicles.length ? room.vehicles.map((c) => [c.id, r2(c.x), r2(c.y), r2(c.z), r2(c.yaw), c.driver || 0]) : undefined;
-    broadcast(room, { t: 's', ts: now, p: snap, ...(veh ? { v: veh } : {}) });
+    broadcast(room, { t: 's', ts: now, p: snap });
     for (const p of expired) removePlayer(p);
   }
   const work = Date.now() - now;

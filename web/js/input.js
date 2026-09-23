@@ -29,8 +29,7 @@ export class Input {
     this._cycle = 0;
     this._scopeToggle = false;
     this._crouchToggle = false;  // touche C (ou bouton tactile) : accroupi = bascule, pas maintien
-    this._vehicle = false;       // monter/descendre de véhicule : touche V, ou bouton tactile
-    this._shop = false;          // boutique de la survie (ou braquage de la banque en mode Braquage) : touche B, ou bouton tactile
+    this._shop = false;          // boutique de la survie : touche B, ou bouton tactile
     this._nade = false;          // grenade à main : touche G, ou bouton tactile
     this._alt = false;           // tir secondaire (pistolet portail) : clic droit, E, ou bouton ZOOM sur mobile
     this._mapToggle = false;
@@ -82,7 +81,6 @@ export class Input {
   takeAlt() { const r = this._alt; this._alt = false; return r && this.active; }
   takeScopeToggle() { const r = this._scopeToggle; this._scopeToggle = false; return r && this.active; }
   takeCrouchToggle() { const r = this._crouchToggle; this._crouchToggle = false; return r && this.active; }
-  takeVehicle() { const r = this._vehicle; this._vehicle = false; return r && this.active; }
 
   reset() {
     this.keys.clear();
@@ -90,7 +88,7 @@ export class Input {
     this.scopeHeld = this.jumpHeld = this.scoreHeld = this.sprintHeld = false;
     this.stick.x = this.stick.y = 0;
     this._lookX = this._lookY = 0;
-    this._reload = false; this._weapon = null; this._cycle = 0; this._scopeToggle = false; this._crouchToggle = false; this._vehicle = false; this._alt = false; this._nade = false; this._shop = false; this._mapToggle = false;
+    this._reload = false; this._weapon = null; this._cycle = 0; this._scopeToggle = false; this._crouchToggle = false; this._alt = false; this._nade = false; this._shop = false; this._mapToggle = false;
     this._arrowT.x = this._arrowT.y = 0;
   }
 
@@ -123,7 +121,6 @@ export class Input {
       if (c === 'KeyG') { this._nade = true; return; }
       if (c === 'KeyB') { this._shop = true; return; }
       if (c === 'KeyC' || c === 'ControlLeft') { if (!this.keys.has(c)) { this._crouchToggle = true; this.keys.add(c); } return; }
-      if (c === 'KeyV') { if (!this.keys.has(c)) { this._vehicle = true; this.keys.add(c); } return; }
       if (c === 'ShiftLeft' || c === 'ShiftRight') { this.sprintHeld = true; return; }
       if (FIRE_KEYS.includes(c)) {
         e.preventDefault();
@@ -184,7 +181,6 @@ export class Input {
         case 'reload': if (on) this._reload = true; break;
         case 'scope': if (on) { this._scopeToggle = true; this._alt = true; } break;
         case 'crouch': if (on) this._crouchToggle = true; break;
-        case 'car': if (on) this._vehicle = true; break;
         case 'pause': if (on) this.onPause?.(); break;
         case 'nade': if (on) this._nade = true; break;
         case 'shop': if (on) this._shop = true; break;

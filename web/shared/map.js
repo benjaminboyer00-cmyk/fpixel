@@ -283,9 +283,15 @@ function buildCity() {
     building(0, s * 41, 16, 12, [s > 0 ? 'n' : 's', 'w', 'e'], 'plaster');
   }
 
-  // Rues (cosmétique) : croisement principal devant la place centrale
-  add(0, 0, 2 * half + 2, 6, 0.05, -0.05, 'road');
-  add(0, 0, 6, 2 * half + 2, 0.05, -0.05, 'road');
+  // Rues (cosmétique, sans collision) : quadrillage complet dans les couloirs dégagés entre les immeubles
+  // (jamais sous un bâtiment, sinon la route se voit traverser les murs à l'intérieur)
+  const STREET_LINES = [-59, -12.5, 12.5, 59];
+  for (const v of STREET_LINES) {
+    add(v, 0, 6, 2 * half + 2, 0.05, -0.05, 'road');   // rue nord-sud (le long de Z, à x=v)
+    add(0, v, 2 * half + 2, 6, 0.05, -0.05, 'road');   // rue est-ouest (le long de X, à z=v)
+  }
+  // Lampadaires au coin des croisements intérieurs (décalés du centre pour ne pas gêner les voitures)
+  for (const x of [-12.5, 12.5]) for (const z of [-12.5, 12.5]) add(x + (x > 0 ? 2.2 : -2.2), z + (z > 0 ? 2.2 : -2.2), 0.3, 0.3, 3.2, 0, 'pillar');
 
   // Place centrale : monument, murets, buissons
   add(0, 0, 6, 6, 1.0, 0, 'stone');
@@ -320,16 +326,9 @@ function buildCity() {
     [-58, -58], [58, -58], [-58, 58], [58, 58], [-58, 0], [58, 0], [0, -58], [-30, -58], [30, -58], [-58, -30], [58, -30], [-58, 30], [58, 30],
   ].map(([x, z]) => ({ x, z }));
 
-  // Mode Braquage : la banque est l'immeuble du coin (24,24), les voitures apparaissent dans les rues dégagées
-  const bank = { x: 24, z: 24 };
-  const carSpawns = [
-    [0, 20, Math.PI], [0, -20, 0], [20, 0, -Math.PI / 2], [-20, 0, Math.PI / 2],
-    [0, 36, Math.PI], [0, -36, 0], [36, 0, -Math.PI / 2], [-36, 0, Math.PI / 2],
-  ].map(([x, z, yaw]) => ({ x, z, yaw }));
-
   return {
     id: 'city', name: 'Quartier', desc: 'Très grande carte : rues, immeubles et place centrale (multi et survie)',
-    half, boxes, spawns, mobSpawns, bank, carSpawns, interiors,
+    half, boxes, spawns, mobSpawns, interiors,
     sky: '#a9c4dd', fog: [60, 170], floor: '#6b6e75',
   };
 }

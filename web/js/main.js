@@ -59,7 +59,7 @@ function joinMsg() {
     t: 'join', name: settings.name, mode: settings.mode,
     room: settings.room.trim() || (settings.mode === 'survival' ? `solo-${token.slice(0, 10)}` : ''),   // survie : salon privé (solo) sauf si on donne un nom pour jouer en coop
     bots: settings.bots ? (settings.fill || 1) : 0, diff: settings.diff, limit: settings.limit, token,
-    map: settings.mode === 'heist' ? 'city' : settings.map, cls: settings.cls, loadout: settings.cls === 'custom' ? settings.custom : undefined,
+    map: settings.map, cls: settings.cls, loadout: settings.cls === 'custom' ? settings.custom : undefined,
   };
 }
 
@@ -71,16 +71,13 @@ if (!MODES[settings.mode]) settings.mode = 'ffa';
 function selectMode(m) {
   settings.mode = m;
   document.querySelectorAll('.mode').forEach((b) => b.classList.toggle('sel', b.dataset.mode === m));
-  $('f-class').classList.toggle('off', m === 'gun' || m === 'survival' || m === 'heist'); // armes imposées : niveau (Gun Game), boutique (survie) ou rôle (Braquage)
+  $('f-class').classList.toggle('off', m === 'gun' || m === 'survival'); // armes imposées : niveau (Gun Game) ou boutique (survie)
   const surv = m === 'survival';
   document.querySelector('.f-bots').classList.toggle('hidden', surv);
   document.querySelector('.f-room').firstChild.textContent = surv ? 'Salon coop ' : 'Salon privé ';
   const opt = { easy: surv ? 'Monstres faibles' : 'Bots faciles', normal: surv ? 'Monstres normaux' : 'Bots normaux', hard: surv ? 'Monstres coriaces' : 'Bots difficiles' };
   for (const o of $('diff').options) o.textContent = opt[o.value];
   if (surv && settings.map === 'arena' && $('map')) { settings.map = 'city'; $('map').value = 'city'; $('map-desc').textContent = MAPS.city.desc; }
-  // Braquage : voitures/banque uniquement sur Quartier, la carte est donc fixée pour ce mode
-  $('f-map')?.classList.toggle('off', m === 'heist');
-  if (m === 'heist' && $('map')) { settings.map = 'city'; $('map').value = 'city'; $('map-desc').textContent = MAPS.city.desc; }
   saveSettings(settings);
 }
 document.querySelectorAll('.mode').forEach((b) => b.addEventListener('click', () => selectMode(b.dataset.mode)));

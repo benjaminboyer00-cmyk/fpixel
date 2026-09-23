@@ -8,7 +8,6 @@ import { canSee, flowDir, randomRoam } from './bots.js';
 
 // hp / speed (multiplicateur) / melee = { dmg, cd (ms), reach (m) } / weapon = arme à distance (index) avec pref = distance préférée et range = portée
 // err = imprécision de tir (rad), react = délai avant de tirer (ms), scale = taille, reward = points gagnés par le tueur
-// Ni melee ni weapon = PNJ civil (mode Braquage) : incapable de se battre, fuit les joueurs, sinon déambule.
 export const MOBS = {
   zombie:   { name: 'Zombie',  hp: 60,   speed: 0.65, melee: { dmg: 14, cd: 900,  reach: 1.8 }, scale: 1.0, color: '#5f9a4a', reward: 10, sight: 45 },
   runner:   { name: 'Coureur', hp: 35,   speed: 1.15, melee: { dmg: 10, cd: 600,  reach: 1.7 }, scale: 0.9, color: '#c98a3a', reward: 14, sight: 45 },
@@ -16,7 +15,6 @@ export const MOBS = {
   brute:    { name: 'Brute',   hp: 380,  speed: 0.55, melee: { dmg: 38, cd: 1200, reach: 2.3 }, scale: 1.5, color: '#9a3a3a', reward: 70, sight: 45 },
   sniper:   { name: 'Tireur',  hp: 60,   speed: 0.55, weapon: W.SNIPER, pref: 40, range: 90, err: 0.03, react: 900, scale: 1.0, color: '#3a5a9a', reward: 45, sight: 100 },
   boss:     { name: 'Colosse', hp: 2400, speed: 0.5,  melee: { dmg: 60, cd: 1300, reach: 3.2 }, weapon: W.ROCKET, pref: 18, range: 60, err: 0.03, react: 800, scale: 2.0, color: '#7a2a8a', reward: 500, sight: 90 },
-  civilian: { name: 'Civil',   hp: 20,   speed: 0.55, scale: 1.0, color: '#c9b48a', reward: 0, sight: 26 },
 };
 
 // Réglages de difficulté choisis à la création du salon (les bots « easy / normal / hard » du menu)
