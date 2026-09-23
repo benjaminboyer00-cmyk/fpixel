@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "start": "node server/index.js",
-    "dev": "PORT=7860 node server/index.js"
+    "dev": "PORT=7860 node server/index.js",
+    "test": "node test/physics.mjs && node test/smoke.mjs && node test/security.mjs"
   },
   "dependencies": {
     "ws": "^8.18.0"

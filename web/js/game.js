@@ -4,7 +4,7 @@ import {
   TICK_MS, INTERP_MS, MIN_INTERP_MS, MAX_EXTRAP_MS, MODES, EYE_HEIGHT, EYE_HEIGHT_CROUCH, MAX_HP, RESPAWN_MS, WALK_SPEED, JUMP_SPEED, SPRINT_MUL, CROUCH_SPEED_MUL, WEAPONS, GUN_ORDER, KNIFE, resolveClass, STREAK_WEAPONS,
 } from '../shared/config.js';
 import { mapById } from '../shared/map.js';
-import { mulberry32, applySpread, lookDir, clamp, angleLerp, rayAABB } from '../shared/util.js';
+import { mulberry32, applySpread, lookDir, clamp, angleLerp, rayAABB, shotSeed } from '../shared/util.js';
 import { createWorld } from './world.js';
 import { buildPlayer, makeNameSprite } from './models.js';
 import { ViewModel } from './viewmodel.js';
@@ -109,6 +109,7 @@ export class Game {
   // ------------------------------------------------------------ cycle de vie ----
   start(welcome) {
     this.stop();
+    this.sn = welcome.sn | 0; this.shotN = 0;   // graines de tir (le serveur remet son compteur à 0 à chaque welcome)
     this.myId = welcome.id;
     this.teamName = welcome.team;
     this.room = welcome.room;
@@ -359,6 +360,11 @@ export class Game {
     n.on('portalOff', (m) => {
       this.portals.delete(m.o);
       this.fx.removePortal(`${m.o}:0`); this.fx.removePortal(`${m.o}:1`);
+    });
+    n.on('fix', (m) => { // le serveur a refusé un déplacement trop rapide : on se recale sur sa position
+      const me = this.me;
+      if (!me?.alive) return;
+      me.x = m.x; me.y = m.y; me.z = m.z; me.vx = me.vz = 0; me.pull = null;
     });
     n.on('push', (m) => { // recul d'explosion : impulsion calculée par le serveur
       const me = this.me;
@@ -890,12 +896,12 @@ export class Game {
 
     const ex = me.x, ey = me.y + EYE_HEIGHT, ez = me.z;
     const [dx, dy, dz] = lookDir(me.yaw, me.pitch);
-    const seed = (Math.random() * 2147483647) | 0;
+    const seed = shotSeed(this.sn, this.shotN++);   // imposée par le serveur (nonce du welcome), voir shared/util.js
     const spread = w.scopeSpread !== undefined && me.scoped ? w.scopeSpread
       : w.ads && me.aiming && w.ads.spread !== undefined ? w.ads.spread : w.spread;
 
     this.net.send({
-      t: 'fire', w: me.weapon, seed, sc: me.scoped ? 1 : 0, alt: alt ? 1 : 0,
+      t: 'fire', w: me.weapon, sc: me.scoped ? 1 : 0, ad: me.aiming ? 1 : 0, alt: alt ? 1 : 0,
       ox: +ex.toFixed(3), oy: +ey.toFixed(3), oz: +ez.toFixed(3),
       dx: +dx.toFixed(4), dy: +dy.toFixed(4), dz: +dz.toFixed(4),
       rt: Math.round(this.net.serverNow() - this.interp),

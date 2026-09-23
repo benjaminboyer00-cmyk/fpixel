@@ -10,7 +10,7 @@ import { MAPS } from '../web/shared/map.js';
 
 const PORT = 7861;
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
-const srv = spawn('node', ['server/index.js'], { cwd: root, env: { ...process.env, PORT: String(PORT), KILL_LIMIT: '2', STREAKS: '1,2,3', SURV_FIRST_PREP_MS: '1500', SURV_PREP_MS: '2500', SURV_OVER_MS: '2500', SURV_START_CASH: '1000', SURV_MOB_SPEED: '3', RESPAWN_MS: '600', PROTECT_MS: '300', GRACE_MS: '1500' }, stdio: 'inherit' });
+const srv = spawn('node', ['server/index.js'], { cwd: root, env: { ...process.env, MOVE_CHECK: '0', PORT: String(PORT), KILL_LIMIT: '2', STREAKS: '1,2,3', SURV_FIRST_PREP_MS: '1500', SURV_PREP_MS: '2500', SURV_OVER_MS: '2500', SURV_START_CASH: '1000', SURV_MOB_SPEED: '3', RESPAWN_MS: '600', PROTECT_MS: '300', GRACE_MS: '1500' }, stdio: 'inherit' });
 process.on('exit', () => srv.kill());
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

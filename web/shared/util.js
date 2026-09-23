@@ -10,6 +10,15 @@ export function mulberry32(seed) {
   };
 }
 
+// Graine du n-ième tir d'un joueur, dérivée d'un nonce donné par le serveur à la connexion.
+// Le client la connaît (même dispersion affichée que celle calculée par le serveur) mais ne peut plus la CHOISIR :
+// avant, un client modifié pouvait envoyer la graine qui donne une dispersion nulle (sniper sans viser = précision parfaite).
+export function shotSeed(nonce, n) {
+  let h = Math.imul((nonce | 0) ^ Math.imul((n | 0) + 1, 0x9e3779b1), 0x85ebca6b);
+  h ^= h >>> 13; h = Math.imul(h, 0xc2b2ae35); h ^= h >>> 16;
+  return h | 0;
+}
+
 export const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 
 // Rayon contre boîte alignée sur les axes (méthode des "slabs").

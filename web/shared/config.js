@@ -204,7 +204,7 @@ export const weaponCost = (list) => list.reduce((s, i) => s + (WEAPONS[i]?.cost 
 
 // Valide une classe demandée par un client (identifiant prédéfini, ou 'custom' + liste d'armes) : jamais de confiance aveugle.
 export function resolveClass(id, loadout) {
-  if (CLASSES[id]) return CLASSES[id];
+  if (typeof id === 'string' && Object.hasOwn(CLASSES, id)) return CLASSES[id];
   if (id === 'custom' && Array.isArray(loadout)) {
     const seen = new Set();
     const weapons = [];

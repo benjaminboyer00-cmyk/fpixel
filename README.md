@@ -55,6 +55,8 @@ npm install
 npm run dev          # http://localhost:7860 (serveur + client)
 node test/smoke.mjs  # bots WebSocket : duel, mur, headshot, équipes, fin de manche, IA des bots, options, reconnexion, Gun Game
 node test/physics.mjs
+node test/security.mjs  # messages piégés, fuzz, limites de connexions, tir à travers un mur
+npm test             # les trois suites d'un coup
 ```
 
 ## Déployer
@@ -73,3 +75,18 @@ Tout est dans `web/shared/config.js` (dégâts, cadence, limite de frags, vitess
 - Les tirs sont envoyés avec une graine aléatoire : le **serveur** refait le tir (mêmes plombs), le teste contre les murs et contre les joueurs
   **rembobinés** à l'instant vu par le tireur (compensation de lag), puis applique les dégâts. Un client modifié ne peut donc pas s'octroyer de faux dégâts.
 - Les autres joueurs sont affichés 100 ms « dans le passé » et interpolés.
+- La graine de dispersion est imposée par le serveur (nonce envoyé au `welcome` + compteur de tirs) : le client la connaît pour dessiner
+  les mêmes plombs, mais ne peut plus choisir celle qui donne une dispersion nulle.
+- L'origine du tir doit être visible depuis les yeux du joueur (pas de tir « à travers » un mur en décalant l'origine).
+- Déplacements : le client calcule encore son mouvement, mais le serveur tient un budget de distance (vitesse max + marge,
+  ~0,8 s d'avance). Téléportation et speedhack sont refusés et le client est recalé (`fix`). `MOVE_CHECK=0` le désactive (tests).
+- **Limite connue** : pas encore de collision serveur (noclip possible) ni de munitions comptées côté serveur. Voir `ROADMAP.md`.
+
+## Limites anti-abus (variables d'environnement)
+
+`MAX_CONN` (200 connexions), `MAX_PER_IP` (8, via `X-Forwarded-For` derrière le proxy HF), `MAX_ROOMS` (40 salons).
+Un message qui plante est journalisé sans faire tomber le serveur ; une erreur dans un salon ferme ce salon seulement.
+
+## Feuille de route
+
+Synthèse complète du projet et plan pour monter en gamme : [`ROADMAP.md`](ROADMAP.md).

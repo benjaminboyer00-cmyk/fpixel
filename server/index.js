@@ -7,15 +7,16 @@ import path from 'node:path';
 import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
+import { randomInt } from 'node:crypto';
 
 import {
-  TICK_MS, REWIND_MAX_MS, MAX_RAY, EYE_HEIGHT, MAX_HP, RESPAWN_MS, SPAWN_PROTECT_MS,
+  TICK_MS, REWIND_MAX_MS, MAX_RAY, EYE_HEIGHT, MAX_HP, WALK_SPEED, SPRINT_MUL, RESPAWN_MS, SPAWN_PROTECT_MS,
   REGEN_DELAY_MS, REGEN_PER_S, END_SCREEN_MS, BODY_HALF, BODY_TOP, HEAD_HALF, HEAD_TOP, BODY_TOP_CROUCH, HEAD_TOP_CROUCH,
   MODES, WEAPONS, GUN_ORDER, KNIFE, CLASSES, resolveClass, W, STREAK_WEAPONS, STREAK_AT, NUKE_GAS_MS, NUKE_GAS_DPS, NADE_MAX, NADE_REGEN_MS, SURV, shopItem, shopPrice,
   MYSTERY_POOL, MYSTERY_RARE, MYSTERY_RARE_CHANCE,
 } from '../web/shared/config.js';
 import { MAPS, mapById } from '../web/shared/map.js';
-import { rayAABB, applySpread, mulberry32, clamp } from '../web/shared/util.js';
+import { rayAABB, applySpread, mulberry32, clamp, shotSeed } from '../web/shared/util.js';
 import { BOT_NAMES, newBotAI, botStep, botClass, computeFlow } from './bots.js';
 import { MOBS, mobPower, waveList, newMobState, mobStep } from './mobs.js';
 import { stepPlane, PLANE } from '../web/shared/plane.js';
@@ -32,6 +33,8 @@ const PORT = Number(process.env.PORT) || 7860;
 const RESPAWN = Number(process.env.RESPAWN_MS) || RESPAWN_MS;
 const PROTECT = Number(process.env.PROTECT_MS) || SPAWN_PROTECT_MS;
 const GRACE_MS = Number(process.env.GRACE_MS) || 20000; // temps laissé à un joueur déconnecté pour revenir
+// Contrôle des déplacements : 0 pour le désactiver (tests qui téléportent les joueurs)
+const MOVE_CHECK = process.env.MOVE_CHECK !== '0';
 const WEB_ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'web');
 
 // ---------------------------------------------------------------- HTTP ----
@@ -119,8 +122,9 @@ function lobbyInfo() {
   for (const r of rooms.values()) {
     const n = humanCount(r);
     modes[r.mode].players += n;
-    modes[r.mode].rooms.push({ id: r.name, n, max: r.cfg.max, bots: r.fill, diff: r.diff });
     online += n;
+    if (r.private) continue;   // survie en solo : jamais listée (son nom dérive du jeton de reconnexion)
+    modes[r.mode].rooms.push({ rid: r.id, id: r.name, n, max: r.cfg.max, bots: r.fill, diff: r.diff, map: r.map.id, auto: r.auto, state: r.state });
   }
   const r1 = (v) => Math.round(v * 10) / 10;
   return { ok: true, online, modes, tick: { ms: TICK_MS, late: r1(tickStats.late), lateMax: r1(tickStats.lateMax), work: r1(tickStats.work), workMax: r1(tickStats.workMax) } };
@@ -147,7 +151,7 @@ function parseOpts(m) {
     bots,
     diff: DIFF_IDS.includes(m.diff) ? m.diff : 'normal',
     limit: clamp(Math.round(Number(m.limit)) || 0, 0, 200),
-    map: MAPS[m.map] ? m.map : 'arena',
+    map: typeof m.map === 'string' && Object.hasOwn(MAPS, m.map) ? m.map : 'arena',
   };
 }
 const optsKey = (o) => `${o.bots}|${o.diff}|${o.limit}|${o.map}`;
@@ -160,6 +164,7 @@ function findRoom(mode, name, opts) {
     const id = `${mode}:${name}`;
     let room = rooms.get(id);
     if (!room) room = createRoom(id, mode, name, opts);
+    if (!room) return null;
     return humanCount(room) >= cfg.max ? null : room;
   }
   const key = optsKey(opts);
@@ -168,11 +173,15 @@ function findRoom(mode, name, opts) {
   }
   const n = nextAutoRoom++;
   const room = createRoom(`${mode}#${n}`, mode, `salon ${n}`, opts);
+  if (!room) return null;
   room.auto = true;
   return room;
 }
 
+const MAX_ROOMS = Number(process.env.MAX_ROOMS) || 40;   // chaque salon fait tourner jusqu'à 10 bots : on borne le total
+
 function createRoom(id, mode, name, opts) {
+  if (rooms.size >= MAX_ROOMS) return null;
   const cfg = MODES[mode];
   const map = mapById(opts.map);
   const room = {
@@ -191,6 +200,7 @@ function createRoom(id, mode, name, opts) {
     flow: null, flowAt: 0, flowKey: '',   // champ de flux des monstres (survie)
     nuke: null,                    // missile nucléaire en vol : { owner, at }
     gas: null,                     // gaz toxique après le missile : { owner, until }
+    private: mode === 'survival' && name.startsWith('solo'),   // survie solo : jamais listée publiquement
   };
   rooms.set(id, room);
   return room;
@@ -393,6 +403,7 @@ function spawnPlayer(room, p, now = Date.now()) {
   p.protectUntil = now + PROTECT;
   p.lastDamage = 0; p.nextFire = 0;
   p.hist = [];
+  resetMove(p, now);
   send(p, { t: 'spawn', x: s.x, y: 0, z: s.z, yaw: s.yaw, hp: p.maxHp, maxHp: p.maxHp, loadout: p.loadout, speed: p.speedMul, nades: p.nades });
 }
 
@@ -506,12 +517,47 @@ function hitNormal(box, px, py, pz) {
   return { nx: faces[0][1], ny: faces[0][2], nz: faces[0][3] };
 }
 
+// ---- contrôle des déplacements envoyés par les clients ----
+// Le client calcule encore son mouvement (réactivité), mais le serveur tient un « budget de distance » qui se recharge à la
+// vitesse max autorisée (sprint × bonus de classe + marge). Un saut de position plus grand que le budget est refusé et le
+// client est recalé ({t:'fix'}). Seau percé plafonné à ~1 s de course : une coupure réseau (paquets en rafale) passe sans
+// accroc, un speedhack ou une téléportation non. Grappin et explosions ouvrent une fenêtre plus large (moveBoost / resetMove).
+const MOVE_SLACK = 2.5;                                   // mètres de tolérance permanente
+function resetMove(p, now) { p.mv = { t: now, budget: 1e9 }; }  // prochaine position acceptée telle quelle (réapparition…)
+function moveBoost(p, now, ms, speed) {
+  const active = now < (p.boostUntil || 0);
+  p.boostSpeed = active ? Math.max(p.boostSpeed || 0, speed) : speed;
+  p.boostUntil = Math.max(active ? p.boostUntil : 0, now + ms);
+}
+function nearPortal(room, x, z) {
+  for (const pair of room.portals.values()) for (const q of pair) if (q && Math.hypot(q.x - x, q.z - z) < 3.2) return true;
+  return false;
+}
+function checkMove(p, x, z, now) {
+  if (!MOVE_CHECK || p.bot) return true;
+  const mv = p.mv || (p.mv = { t: now, budget: 0 });
+  const dt = Math.min(1000, Math.max(0, now - mv.t)) / 1000;
+  mv.t = now;
+  const vmax = WALK_SPEED * SPRINT_MUL * (p.speedMul || 1) * 1.3 + (now < (p.boostUntil || 0) ? p.boostSpeed || 0 : 0);
+  const cap = vmax * 0.8 + MOVE_SLACK;   // ~0,8 s de course d'avance au maximum
+  if (mv.budget > cap && mv.budget < 1e8) mv.budget = cap;
+  const d = Math.hypot(x - p.x, z - p.z);
+  if (mv.budget >= 1e8) { mv.budget = cap; return true; }       // après une remise à zéro
+  mv.budget = Math.min(cap, mv.budget + vmax * dt);
+  if (d <= mv.budget) { mv.budget -= d; return true; }
+  if (nearPortal(p.room, x, z) && nearPortal(p.room, p.x, p.z)) { mv.budget = cap; return true; }   // traversée de portail
+  p.moveStrikes = (p.moveStrikes || 0) + 1;
+  return false;
+}
+
 // Recul / attraction : les mouvements sont calculés par les clients, on leur envoie l'impulsion
 function pushPlayer(q, vx, vy, vz) {
+  moveBoost(q, Date.now(), 1500, Math.hypot(vx, vz) * 1.2 + 4);
   if (q.bot) { q.vx += vx; q.vy += vy; q.vz += vz; q.onGround = false; }
   else send(q, { t: 'push', v: [r2(vx), r2(vy), r2(vz)] });
 }
 function pullPlayer(q, to, pull, now, hook = null) {
+  moveBoost(q, now, pull.ms + 600, pull.speed * 1.25);
   if (q.bot) q.pull = { x: to.x, z: to.z, speed: pull.speed, until: now + pull.ms };
   else send(q, { t: 'pull', x: r2(to.x), y: r2(to.y), z: r2(to.z), sp: pull.speed, ms: pull.ms, ...(hook ? { hook: hook.map(r2) } : {}) });
 }
@@ -989,6 +1035,8 @@ function awardStreak(room, p) {
 
 function handleFire(p, m, now) {
   const room = p.room;
+  // humains : la graine est imposée par le serveur (compteur incrémenté à chaque message « fire », comme côté client)
+  const seed = p.bot ? m.seed | 0 : shotSeed(p.sn, p.shotN++);
   if (!p.alive || room.state === 'ended') return;
   const wi = m.w | 0;
   const w = WEAPONS[wi];
@@ -1020,10 +1068,15 @@ function handleFire(p, m, now) {
 
   let ox = +m.ox, oy = +m.oy, oz = +m.oz;
   const ex = p.x, ey = p.y + EYE_HEIGHT, ez = p.z;
-  if (!Number.isFinite(ox + oy + oz) || Math.hypot(ox - ex, oy - ey, oz - ez) > 3) { ox = ex; oy = ey; oz = ez; }
+  // L'origine envoyée doit rester proche des yeux ET visible depuis eux : sinon, collé à un mur, un client modifié
+  // pouvait placer l'origine jusqu'à 3 m plus loin, de l'autre côté du mur, et tirer à travers.
+  if (!Number.isFinite(ox + oy + oz) || Math.hypot(ox - ex, oy - ey, oz - ez) > 3 || !clearLine(room.map, [ex, ey, ez], [ox, oy, oz])) { ox = ex; oy = ey; oz = ez; }
 
-  const rng = mulberry32(m.seed | 0);
-  const spread = w.scopeSpread !== undefined && m.sc ? w.scopeSpread : w.spread;
+  const rng = mulberry32(seed);
+  // même règle que le client (game.js) : lunette > visée (ADS) > hanche. Avant, le serveur ignorait l'ADS :
+  // le client affichait un tir précis (0.004) mais le serveur calculait la dispersion de la hanche (0.014) => touches fantômes.
+  const spread = w.scopeSpread !== undefined && m.sc ? w.scopeSpread
+    : w.ads && m.ad && w.ads.spread !== undefined ? w.ads.spread : w.spread;
   const maxD = w.melee ? w.range : MAX_RAY;
   const rewindT = clamp(Number.isFinite(+m.rt) ? +m.rt : now, now - REWIND_MAX_MS, now);
   const pad = w.melee ? 0.25 : 0;
@@ -1158,7 +1211,7 @@ function handleMessage(ws, raw) {
 
   if (m.t === 'join') {
     if (ws.player) return;
-    const mode = MODES[m.mode] ? m.mode : 'ffa';
+    const mode = typeof m.mode === 'string' && Object.hasOwn(MODES, m.mode) ? m.mode : 'ffa';
     const token = typeof m.token === 'string' ? m.token.slice(0, 64) : '';
     const ghost = token ? tokens.get(token) : null;
     let room, p, returning = false;
@@ -1171,14 +1224,17 @@ function handleMessage(ws, raw) {
       p.ws = ws; ws.player = p; p.away = false; p.graceUntil = 0;
     } else {
       if (ghost) removePlayer(ghost); // ancien joueur avec ce jeton dans un autre salon : on le retire
-      room = findRoom(mode, cleanRoom(m.room), parseOpts(m));
-      if (!room) return ws.send(JSON.stringify({ t: 'error', msg: 'Ce salon est complet.' }));
+      // navigateur de salons : rejoindre un salon précis par son identifiant (même mode, pas plein, pas privé)
+      const picked = typeof m.rid === 'string' ? rooms.get(m.rid.slice(0, 40)) : null;
+      room = picked && picked.mode === mode && !picked.private && humanCount(picked) < picked.cfg.max ? picked : findRoom(mode, cleanRoom(m.room), parseOpts(m));
+      if (!room) return ws.send(JSON.stringify({ t: 'error', msg: rooms.size >= MAX_ROOMS ? 'Serveur plein, réessaie dans un moment.' : 'Ce salon est complet.' }));
       p = addPlayer(room, ws, m.name);
       p.cls = resolveClass(m.cls, m.loadout);
       if (token) { p.token = token; tokens.set(token, p); }
     }
+    p.sn = randomInt(0, 2 ** 31); p.shotN = 0;   // graines de tir : le serveur les impose (voir shotSeed)
     send(p, {
-      t: 'welcome', id: p.id, ts: now, team: p.team,
+      t: 'welcome', id: p.id, ts: now, team: p.team, sn: p.sn,
       room: { id: room.id, name: room.name, mode: room.mode, limit: room.killLimit, diff: room.diff, fill: room.fill, map: room.map.id },
       players: [...room.players.values()].map(publicPlayer),
       state: room.state, win: room.winner, until: room.endAt,
@@ -1223,7 +1279,9 @@ function handleMessage(ws, raw) {
     const x = +m.x, y = +m.y, z = +m.z;
     if (!Number.isFinite(x + y + z)) return;
     const half = p.room.map.half;
-    p.x = clamp(x, -half, half); p.z = clamp(z, -half, half); p.y = clamp(y, -5, 20);
+    const nx = clamp(x, -half, half), nz = clamp(z, -half, half);
+    if (checkMove(p, nx, nz, now)) { p.x = nx; p.z = nz; p.y = clamp(y, -5, 20); }
+    else if (now - (p.lastFix || 0) > 250) { p.lastFix = now; send(p, { t: 'fix', x: r2(p.x), y: r2(p.y), z: r2(p.z) }); }   // recalage (au plus 4 fois/s)
     p.yaw = Number.isFinite(+m.yaw) ? +m.yaw : p.yaw;
     p.pitch = clamp(Number.isFinite(+m.pitch) ? +m.pitch : p.pitch, -1.6, 1.6);
     p.crouch = !!m.c;
@@ -1260,62 +1318,96 @@ setInterval(() => {
   lastTick = now;
   tickStats.late += (late - tickStats.late) * 0.02;
   tickStats.lateMax = Math.max(late, tickStats.lateMax * 0.995);
-  for (const room of rooms.values()) {
-    // fin de manche -> nouvelle manche
-    if (room.state === 'ended' && now >= room.endAt) resetMatch(room);
-
-    const snap = [];
-    const expired = [];
-    for (const p of room.players.values()) {
-      if (p.away) { // déconnecté : invisible et intouchable, retiré après le délai de grâce
-        if (now >= p.graceUntil) expired.push(p);
-        snap.push([p.id, 0, 0, 0, 0, 0, 0, p.weapon, 0, 0]);
-        continue;
+  for (const room of [...rooms.values()]) {
+    try {
+      tickRoom(room, now);
+    } catch (e) {
+      // une erreur dans un salon ne doit pas bloquer les autres : on log et on ferme ce salon proprement
+      console.error(`[tick ${room.id}]`, e?.stack || e);
+      rooms.delete(room.id);
+      for (const p of room.players.values()) {
+        if (p.token && tokens.get(p.token) === p) tokens.delete(p.token);
+        if (p.ws) { p.ws.player = null; try { p.ws.send(JSON.stringify({ t: 'error', msg: 'Erreur serveur : salon fermé.' })); p.ws.close(); } catch { /* déjà fermée */ } }
       }
-      if (!p.alive && p.respawnAt && now >= p.respawnAt && room.state !== 'ended') {
-        p.respawnAt = 0;
-        spawnPlayer(room, p, now);
-      }
-      if (p.bot && p.alive && room.state === 'playing' && now >= p.stunUntil) {
-        const f = p.mob ? mobStep(room, p, now, TICK_MS / 1000) : botStep(room, p, now, TICK_MS / 1000);
-        if (f) { if (f.melee) mobMelee(room, p, f.melee, now); else if (f.nade) handleNade(p, f, now); else handleFire(p, f, now); }
-      }
-      if (p.alive && p.nades < NADE_MAX && p.nadeRegenAt && now >= p.nadeRegenAt && room.mode !== 'gun') {
-        p.nades++;
-        p.nadeRegenAt = p.nades < NADE_MAX ? now + NADE_REGEN_MS : 0;
-        if (!p.bot) send(p, { t: 'nades', n: p.nades });
-      }
-      if (p.alive) {
-        if (p.hp < p.maxHp && now - p.lastDamage > REGEN_DELAY_MS) p.hp = Math.min(p.maxHp, p.hp + REGEN_PER_S * (TICK_MS / 1000));
-        p.hist.push([now, p.x, p.y, p.z, p.yaw]);
-        while (p.hist.length && now - p.hist[0][0] > 1000) p.hist.shift();
-      }
-      snap.push([p.id, r2(p.x), r2(p.y), r2(p.z), r2(p.yaw), r2(p.pitch), Math.ceil(p.hp), p.weapon, p.alive && now < p.protectUntil ? 1 : 0, p.crouch ? 1 : 0]);
     }
-    stepSurvival(room, now);
-    stepProjectiles(room, now, TICK_MS / 1000);
-    stepPlanes(room, now, TICK_MS / 1000);
-    if (room.nuke && now >= room.nuke.at && room.state === 'playing') detonateNuke(room, now);
-    stepGas(room, now, TICK_MS / 1000);
-    broadcast(room, { t: 's', ts: now, p: snap });
-    for (const p of expired) removePlayer(p);
   }
   const work = Date.now() - now;
   tickStats.work += (work - tickStats.work) * 0.02;
   tickStats.workMax = Math.max(work, tickStats.workMax * 0.995);
 }, TICK_MS);
 
+function tickRoom(room, now) {
+  // fin de manche -> nouvelle manche
+  if (room.state === 'ended' && now >= room.endAt) resetMatch(room);
+
+  const snap = [];
+  const expired = [];
+  for (const p of room.players.values()) {
+    if (p.away) { // déconnecté : invisible et intouchable, retiré après le délai de grâce
+      if (now >= p.graceUntil) expired.push(p);
+      snap.push([p.id, 0, 0, 0, 0, 0, 0, p.weapon, 0, 0]);
+      continue;
+    }
+    if (!p.alive && p.respawnAt && now >= p.respawnAt && room.state !== 'ended') {
+      p.respawnAt = 0;
+      spawnPlayer(room, p, now);
+    }
+    if (p.bot && p.alive && room.state === 'playing' && now >= p.stunUntil) {
+      const f = p.mob ? mobStep(room, p, now, TICK_MS / 1000) : botStep(room, p, now, TICK_MS / 1000);
+      if (f) { if (f.melee) mobMelee(room, p, f.melee, now); else if (f.nade) handleNade(p, f, now); else handleFire(p, f, now); }
+    }
+    if (p.alive && p.nades < NADE_MAX && p.nadeRegenAt && now >= p.nadeRegenAt && room.mode !== 'gun') {
+      p.nades++;
+      p.nadeRegenAt = p.nades < NADE_MAX ? now + NADE_REGEN_MS : 0;
+      if (!p.bot) send(p, { t: 'nades', n: p.nades });
+    }
+    if (p.alive) {
+      if (p.hp < p.maxHp && now - p.lastDamage > REGEN_DELAY_MS) p.hp = Math.min(p.maxHp, p.hp + REGEN_PER_S * (TICK_MS / 1000));
+      p.hist.push([now, p.x, p.y, p.z, p.yaw]);
+      while (p.hist.length && now - p.hist[0][0] > 1000) p.hist.shift();
+    }
+    snap.push([p.id, r2(p.x), r2(p.y), r2(p.z), r2(p.yaw), r2(p.pitch), Math.ceil(p.hp), p.weapon, p.alive && now < p.protectUntil ? 1 : 0, p.crouch ? 1 : 0]);
+  }
+  stepSurvival(room, now);
+  stepProjectiles(room, now, TICK_MS / 1000);
+  stepPlanes(room, now, TICK_MS / 1000);
+  if (room.nuke && now >= room.nuke.at && room.state === 'playing') detonateNuke(room, now);
+  stepGas(room, now, TICK_MS / 1000);
+  broadcast(room, { t: 's', ts: now, p: snap });
+  for (const p of expired) removePlayer(p);
+}
+
 // ---------------------------------------------------------------- WebSocket ----
 
 const wss = new WebSocketServer({ server: httpServer, path: '/ws', maxPayload: 2048 });
 
-wss.on('connection', (ws) => {
+// Limites anti-abus : un seul script ne doit pas pouvoir remplir le serveur de salons pleins de bots
+const MAX_CONN = Number(process.env.MAX_CONN) || 200;       // connexions simultanées au total
+const MAX_PER_IP = Number(process.env.MAX_PER_IP) || 8;     // par adresse (une famille / un LAN reste OK)
+const connsByIp = new Map();
+// Derrière le proxy Hugging Face, l'adresse réelle est la première de X-Forwarded-For
+const clientIp = (req) => String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || '?';
+
+wss.on('connection', (ws, req) => {
+  const ip = clientIp(req);
+  const n = connsByIp.get(ip) || 0;
+  if (wss.clients.size > MAX_CONN || n >= MAX_PER_IP) { ws.close(1013, 'busy'); return; }
+  connsByIp.set(ip, n + 1);
+  ws.on('close', () => { const c = (connsByIp.get(ip) || 1) - 1; if (c > 0) connsByIp.set(ip, c); else connsByIp.delete(ip); });
   ws.isAlive = true;
   ws.msgCount = 0;
   ws.on('pong', () => { ws.isAlive = true; });
   ws.on('message', (data) => {
-    if (++ws.msgCount > 150) return; // anti-flood : un client normal envoie ~35 msg/s
-    handleMessage(ws, data.toString());
+    if (++ws.msgCount > 150) { // anti-flood : un client normal envoie ~35 msg/s
+      if (ws.msgCount > 400) ws.terminate(); // flood manifeste : on coupe
+      return;
+    }
+    try {
+      handleMessage(ws, data.toString());
+    } catch (e) {
+      // un message malformé ne doit jamais faire tomber tout le serveur (et tous les salons avec)
+      console.error('[message]', e?.stack || e);
+    }
   });
   ws.on('close', () => {
     const p = ws.player;
