@@ -87,54 +87,72 @@
       </label>
 
       <div class="modes" id="modes">
-        <button class="mode" data-mode="duel">
-          <svg class="mode-ill" viewBox="0 0 32 32" aria-hidden="true">
-            <rect x="4" y="16" width="8" height="12" fill="#e5484d"/>
-            <rect x="6" y="8" width="6" height="6" fill="#e5484d"/>
-            <rect x="20" y="16" width="8" height="12" fill="#3e82f7"/>
-            <rect x="20" y="8" width="6" height="6" fill="#3e82f7"/>
-            <rect x="9" y="4" width="3" height="16" transform="rotate(28 9 4)" fill="#ffb703"/>
-            <rect x="20" y="4" width="3" height="16" transform="rotate(-28 20 4)" fill="#ffb703"/>
-          </svg>
-          <b>⚔ 1v1</b><small>Duel · 10 frags</small><em data-count="duel"></em>
-        </button>
-        <button class="mode" data-mode="tdm">
-          <svg class="mode-ill" viewBox="0 0 32 32" aria-hidden="true">
-            <rect x="2" y="2" width="14" height="28" fill="#e5484d"/><rect x="16" y="2" width="14" height="28" fill="#3e82f7"/>
-            <rect x="6" y="6" width="6" height="6" fill="#ff8b8f"/><rect x="6" y="16" width="6" height="6" fill="#ff8b8f"/>
-            <rect x="20" y="6" width="6" height="6" fill="#8fb6ff"/><rect x="20" y="16" width="6" height="6" fill="#8fb6ff"/>
-            <rect x="15" y="2" width="2" height="28" fill="#0a0d12"/>
-          </svg>
-          <b>🔴🔵 Équipes</b><small>Rouge vs Bleu · 30 frags</small><em data-count="tdm"></em>
-        </button>
-        <button class="mode" data-mode="ffa">
-          <svg class="mode-ill" viewBox="0 0 32 32" aria-hidden="true">
-            <rect x="4" y="4" width="7" height="7" fill="#e5484d"/><rect x="21" y="4" width="7" height="7" fill="#3e82f7"/>
-            <rect x="4" y="21" width="7" height="7" fill="#46a758"/><rect x="21" y="21" width="7" height="7" fill="#ffb703"/>
-            <rect x="13" y="13" width="6" height="6" fill="#e8edf3"/>
-          </svg>
-          <b>💀 Chacun pour soi</b><small>Tous contre tous · 20 frags</small><em data-count="ffa"></em>
-        </button>
-        <button class="mode" data-mode="survival">
-          <svg class="mode-ill" viewBox="0 0 32 32" aria-hidden="true">
-            <rect x="9" y="4" width="14" height="12" fill="#3f7a3b"/>
-            <rect x="9" y="8" width="3" height="3" fill="#0a0d12"/><rect x="20" y="8" width="3" height="3" fill="#0a0d12"/>
-            <rect x="12" y="13" width="8" height="2" fill="#0a0d12"/>
-            <rect x="7" y="16" width="18" height="10" fill="#5f9a4a"/>
-            <rect x="3" y="18" width="5" height="4" fill="#5f9a4a"/><rect x="24" y="18" width="5" height="4" fill="#5f9a4a"/>
-            <rect x="17" y="1" width="3" height="4" fill="#3f7a3b"/><rect x="12" y="1" width="3" height="4" fill="#3f7a3b"/>
-          </svg>
-          <b>🧟 Survie</b><small>Manches infinies · solo ou coop · boutique</small><em data-count="survival"></em>
-        </button>
-        <button class="mode" data-mode="gun">
-          <svg class="mode-ill" viewBox="0 0 32 32" aria-hidden="true">
-            <rect x="3" y="14" width="22" height="4" fill="#ffb703"/>
-            <rect x="23" y="10" width="4" height="4" fill="#ffb703"/>
-            <rect x="9" y="18" width="4" height="7" fill="#a58b62"/>
-            <rect x="3" y="11" width="8" height="3" fill="#8b97a8"/>
-          </svg>
-          <b>🔫 Gun Game</b><small>Une arme par niveau · le couteau gagne</small><em data-count="gun"></em>
-        </button>
+        <div class="cat" data-cat="multi">
+          <button class="cat-head" data-cat="multi">
+            <svg class="cat-ill" viewBox="0 0 32 32" aria-hidden="true">
+              <rect x="3" y="17" width="7" height="11" fill="#e5484d"/><rect x="5" y="9" width="5" height="5" fill="#e5484d"/>
+              <rect x="22" y="17" width="7" height="11" fill="#3e82f7"/><rect x="20" y="9" width="5" height="5" fill="#3e82f7"/>
+              <rect x="13" y="18" width="6" height="10" fill="#46a758"/><rect x="14" y="10" width="4" height="5" fill="#46a758"/>
+              <rect x="8" y="5" width="3" height="14" transform="rotate(28 8 5)" fill="#ffb703"/>
+              <rect x="21" y="5" width="3" height="14" transform="rotate(-28 21 5)" fill="#ffb703"/>
+            </svg>
+            <b>⚔ Multijoueur</b><small>Duel · Équipes · Chacun pour soi</small><em data-count="multi"></em>
+          </button>
+          <div class="cat-sub">
+            <button class="mode" data-mode="duel">
+              <svg class="mode-ill" viewBox="0 0 32 32" aria-hidden="true">
+                <rect x="4" y="16" width="8" height="12" fill="#e5484d"/>
+                <rect x="6" y="8" width="6" height="6" fill="#e5484d"/>
+                <rect x="20" y="16" width="8" height="12" fill="#3e82f7"/>
+                <rect x="20" y="8" width="6" height="6" fill="#3e82f7"/>
+                <rect x="9" y="4" width="3" height="16" transform="rotate(28 9 4)" fill="#ffb703"/>
+                <rect x="20" y="4" width="3" height="16" transform="rotate(-28 20 4)" fill="#ffb703"/>
+              </svg>
+              <b>⚔ 1v1</b><small>Duel · 10 frags</small><em data-count="duel"></em>
+            </button>
+            <button class="mode" data-mode="tdm">
+              <svg class="mode-ill" viewBox="0 0 32 32" aria-hidden="true">
+                <rect x="2" y="2" width="14" height="28" fill="#e5484d"/><rect x="16" y="2" width="14" height="28" fill="#3e82f7"/>
+                <rect x="6" y="6" width="6" height="6" fill="#ff8b8f"/><rect x="6" y="16" width="6" height="6" fill="#ff8b8f"/>
+                <rect x="20" y="6" width="6" height="6" fill="#8fb6ff"/><rect x="20" y="16" width="6" height="6" fill="#8fb6ff"/>
+                <rect x="15" y="2" width="2" height="28" fill="#0a0d12"/>
+              </svg>
+              <b>🔴🔵 Équipes</b><small>Rouge vs Bleu · 30 frags</small><em data-count="tdm"></em>
+            </button>
+            <button class="mode" data-mode="ffa">
+              <svg class="mode-ill" viewBox="0 0 32 32" aria-hidden="true">
+                <rect x="4" y="4" width="7" height="7" fill="#e5484d"/><rect x="21" y="4" width="7" height="7" fill="#3e82f7"/>
+                <rect x="4" y="21" width="7" height="7" fill="#46a758"/><rect x="21" y="21" width="7" height="7" fill="#ffb703"/>
+                <rect x="13" y="13" width="6" height="6" fill="#e8edf3"/>
+              </svg>
+              <b>💀 Chacun pour soi</b><small>Tous contre tous · 20 frags</small><em data-count="ffa"></em>
+            </button>
+          </div>
+        </div>
+        <div class="cat" data-cat="survie">
+          <button class="cat-head" data-cat="survie" data-mode="survival">
+            <svg class="cat-ill" viewBox="0 0 32 32" aria-hidden="true">
+              <rect x="9" y="4" width="14" height="12" fill="#3f7a3b"/>
+              <rect x="9" y="8" width="3" height="3" fill="#0a0d12"/><rect x="20" y="8" width="3" height="3" fill="#0a0d12"/>
+              <rect x="12" y="13" width="8" height="2" fill="#0a0d12"/>
+              <rect x="7" y="16" width="18" height="10" fill="#5f9a4a"/>
+              <rect x="3" y="18" width="5" height="4" fill="#5f9a4a"/><rect x="24" y="18" width="5" height="4" fill="#5f9a4a"/>
+              <rect x="17" y="1" width="3" height="4" fill="#3f7a3b"/><rect x="12" y="1" width="3" height="4" fill="#3f7a3b"/>
+            </svg>
+            <b>🧟 Survie</b><small>Manches infinies · solo ou coop · boutique</small><em data-count="survival"></em>
+          </button>
+        </div>
+        <div class="cat" data-cat="fun">
+          <button class="cat-head" data-cat="fun" data-mode="gun">
+            <svg class="cat-ill" viewBox="0 0 32 32" aria-hidden="true">
+              <rect x="3" y="14" width="22" height="4" fill="#ffb703"/>
+              <rect x="23" y="10" width="4" height="4" fill="#ffb703"/>
+              <rect x="9" y="18" width="4" height="7" fill="#a58b62"/>
+              <rect x="3" y="11" width="8" height="3" fill="#8b97a8"/>
+            </svg>
+            <b>🔫 Fun : Gun Game</b><small>Une arme par niveau · le couteau gagne</small><em data-count="gun"></em>
+          </button>
+        </div>
       </div>
 
       <div class="f-loadout">

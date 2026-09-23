@@ -68,10 +68,26 @@ $('name').value = settings.name;
 $('room').value = settings.room;
 if (!MODES[settings.mode]) settings.mode = 'ffa';
 
+// carte + classe (montés avant les modes : selectMode() a besoin de menuPicker.setMode)
+for (const m of Object.values(MAPS)) $('map').append(Object.assign(document.createElement('option'), { value: m.id, textContent: m.name }));
+if (!MAPS[settings.map]) settings.map = 'arena';
+$('map').value = settings.map;
+const showMapDesc = () => { $('map-desc').textContent = MAPS[settings.map].desc; };
+showMapDesc();
+$('map').addEventListener('change', () => { settings.map = $('map').value; showMapDesc(); saveSettings(settings); });
+const menuPicker = mountClassPicker($('cls-picker'), settings, { save: () => saveSettings(settings) });
+
+// Catégories du menu : Multijoueur (duel/équipes/chacun pour soi), Survie, Fun (Gun Game)
+const CATEGORIES = { multi: ['duel', 'tdm', 'ffa'], survie: ['survival'], fun: ['gun'] };
+const catOf = (m) => Object.keys(CATEGORIES).find((c) => CATEGORIES[c].includes(m));
+let lastMultiMode = CATEGORIES.multi.includes(settings.mode) ? settings.mode : 'ffa';
+
 function selectMode(m) {
   settings.mode = m;
+  if (CATEGORIES.multi.includes(m)) lastMultiMode = m;
   document.querySelectorAll('.mode').forEach((b) => b.classList.toggle('sel', b.dataset.mode === m));
-  $('f-class').classList.toggle('off', m === 'gun' || m === 'survival'); // armes imposées : niveau (Gun Game) ou boutique (survie)
+  document.querySelectorAll('.cat').forEach((c) => c.classList.toggle('open', c.dataset.cat === catOf(m)));
+  menuPicker.setMode(m); // Gun Game / Survie : la carte montre l'équipement imposé plutôt qu'un choix grisé
   const surv = m === 'survival';
   document.querySelector('.f-bots').classList.toggle('hidden', surv);
   document.querySelector('.f-room').firstChild.textContent = surv ? 'Salon coop ' : 'Salon privé ';
@@ -80,18 +96,12 @@ function selectMode(m) {
   if (surv && settings.map === 'arena' && $('map')) { settings.map = 'city'; $('map').value = 'city'; $('map-desc').textContent = MAPS.city.desc; }
   saveSettings(settings);
 }
-document.querySelectorAll('.mode').forEach((b) => b.addEventListener('click', () => selectMode(b.dataset.mode)));
+document.querySelectorAll('.mode').forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); selectMode(b.dataset.mode); }));
+document.querySelectorAll('.cat-head[data-mode]').forEach((b) => b.addEventListener('click', () => selectMode(b.dataset.mode)));
+document.querySelector('.cat-head[data-cat="multi"]').addEventListener('click', () => selectMode(lastMultiMode));
 selectMode(settings.mode);
 
 showStats();
-// carte + classe
-for (const m of Object.values(MAPS)) $('map').append(Object.assign(document.createElement('option'), { value: m.id, textContent: m.name }));
-if (!MAPS[settings.map]) settings.map = 'arena';
-$('map').value = settings.map;
-const showMapDesc = () => { $('map-desc').textContent = MAPS[settings.map].desc; };
-showMapDesc();
-$('map').addEventListener('change', () => { settings.map = $('map').value; showMapDesc(); saveSettings(settings); });
-mountClassPicker($('cls-picker'), settings, { save: () => saveSettings(settings) });
 // en partie (pause) : changer de classe, effectif à la prochaine réapparition
 function mountPausePicker() {
   mountClassPicker($('pause-cls'), settings, {
@@ -132,6 +142,9 @@ async function refreshStatus() {
     const e = document.querySelector(`[data-count="${m}"]`);
     if (e) e.textContent = lobby.modes[m].players ? `${lobby.modes[m].players} en jeu` : '';
   }
+  const multi = ['duel', 'tdm', 'ffa'].reduce((s, m) => s + (lobby.modes[m]?.players || 0), 0);
+  const eMulti = document.querySelector('[data-count="multi"]');
+  if (eMulti) eMulti.textContent = multi ? `${multi} en jeu` : '';
 }
 setInterval(refreshStatus, 6000);
 refreshStatus();
