@@ -1,5 +1,6 @@
 // Modèles low-poly (que des boîtes) : armes et joueurs.
 import * as THREE from 'three';
+import { skinColor } from '../shared/skins.js';
 
 const matCache = new Map();
 export function mat(color) {
@@ -9,15 +10,22 @@ export function mat(color) {
 }
 
 const boxGeo = new THREE.BoxGeometry(1, 1, 1);
+let SKIN = 0;   // skin appliqué pendant la construction d'une arme (buildGun)
 function box(w, h, d, color, x = 0, y = 0, z = 0) {
-  const m = new THREE.Mesh(boxGeo, mat(color));
+  const m = new THREE.Mesh(boxGeo, mat(SKIN ? skinColor(color, SKIN) : color));
   m.scale.set(w, h, d);
   m.position.set(x, y, z);
   return m;
 }
 
 // Armes : canon vers -Z, origine vers la poignée. userData.muzzle = position de la bouche du canon.
-export function buildGun(id) {
+// skin : index dans SKINS (shared/skins.js), 0 = couleurs d'origine
+export function buildGun(id, skin = 0) {
+  SKIN = skin | 0;
+  try { return makeGun(id); } finally { SKIN = 0; }
+}
+
+function makeGun(id) {
   const g = new THREE.Group();
   let muzzle = [0, 0.02, -0.7];
   switch (id) {
@@ -217,7 +225,8 @@ export const VM_POSE = {
 };
 
 // Joueur adverse : tête, torse, jambes, bras + arme. Faces vers -Z (comme la caméra à yaw 0).
-export function buildPlayer(color) {
+// skins : { idArme: indexSkin } (skins choisis par ce joueur)
+export function buildPlayer(color, skins = {}) {
   const g = new THREE.Group();
   g.add(box(0.6, 0.7, 0.34, color, 0, 1.05, 0));           // torse (0.7 -> 1.4)
 
@@ -253,7 +262,7 @@ export function buildPlayer(color) {
     if (cur === id) return;
     if (cur && guns[cur]) guns[cur].visible = false;
     if (!guns[id]) {
-      guns[id] = buildGun(id);
+      guns[id] = buildGun(id, skins[id] || 0);
       guns[id].position.set(0, 0.02, -0.35);
       guns[id].scale.setScalar(0.9);
       holder.add(guns[id]);

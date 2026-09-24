@@ -45,10 +45,10 @@ export class Hud {
     list.forEach((wi, k) => {
       const w = WEAPONS[wi];
       const series = w.streak !== undefined;            // arme de série : touche 6, 7 ou 8
-      const s = el('div', { className: series ? 'wslot streak' : 'wslot' }, el('b', { textContent: String(series ? 6 + w.streak : k + 1) }), weaponImg(w.id, 40), el('span', { textContent: w.name.replace('Fusil ', 'F. ').replace('Lance-', 'L. ') }));
+      const s = el('div', { className: series ? 'wslot streak' : 'wslot' }, el('b', { textContent: String(series ? 6 + w.streak : k + 1) }), weaponImg(w.id, 40, 'w-icon', this.skins?.[w.id] || 0), el('span', { textContent: w.name.replace('Fusil ', 'F. ').replace('Lance-', 'L. ') }));
       bar.append(s);
       this.slots.push(s);
-      const t = el('button', { className: series ? 'tw streak' : 'tw' }, weaponImg(w.id, 30), el('b', { textContent: String(series ? 6 + w.streak : k + 1) }));
+      const t = el('button', { className: series ? 'tw streak' : 'tw' }, weaponImg(w.id, 30, 'w-icon', this.skins?.[w.id] || 0), el('b', { textContent: String(series ? 6 + w.streak : k + 1) }));
       t.dataset.w = String(series ? 5 + w.streak : k);
       tbar.append(t);
       this.tslots.push(t);

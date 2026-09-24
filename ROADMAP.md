@@ -85,7 +85,7 @@ La cible est le modèle classique des FPS compétitifs. Le client envoie ses ent
 - Tester les cartes en vraie partie et ajuster (durée moyenne entre deux rencontres, lignes de vue trop longues, positions trop fortes).
 - Un **éditeur de cartes** dans le navigateur (une carte n'est qu'une liste de boîtes) et le partage de cartes par lien.
 - **Lisibilité** : contour de couleur sur les ennemis et les alliés, silhouette visible dans la fumée, effets allégés sur mobile.
-- **Réticule personnalisable** (taille, écart, couleur, point) et **sensibilité par arme**.
+- ~~Réticule personnalisable~~ : fait (forme croix / croix + point / T / point / cercle, taille, écart, épaisseur, couleur, contour, aperçu en direct dans les réglages, `web/js/crosshair.js`). Reste la **sensibilité par arme**.
 - **Killcam** de trois secondes (le serveur a déjà l'historique des positions) et **spectateur** entre deux vies en duel.
 
 ### 3.4 Progression et raison de revenir
@@ -93,7 +93,8 @@ La cible est le modèle classique des FPS compétitifs. Le client envoie ses ent
 C'est ce qui manque le plus en dehors du gameplay.
 
 - **Comptes légers** : pseudo plus code secret, ou connexion Google, stockés dans une vraie base. Supabase est le choix naturel, il est déjà connecté à ton environnement.
-- **Niveau de joueur et XP** par partie, **défis quotidiens** (« 10 frags au revolver »), **camouflages d'armes** débloqués par l'usage. Les icônes pixel se prêtent très bien aux variantes de couleur.
+- **Camouflages d'armes** : fait sans base de données (`web/shared/skins.js`, `web/js/armory.js`). 7 skins par arme (Standard, Désert, Forêt, Nuit, Braise, Or, Diamant) débloqués à 10 / 25 / 50 / 100 / 200 / 400 frags avec l'arme, comptés dans le navigateur (`fpixel-stats-v1`, champ `wk`). Le serveur valide le choix (`cleanSkins`) et le montre aux autres joueurs ; un bot sur deux porte un camouflage. Limites connues : trichable côté navigateur (sans enjeu, c'est visuel) et perdu si on vide le navigateur ou change d'appareil.
+- **Niveau de joueur et XP** par partie, **défis quotidiens** (« 10 frags au revolver »). Pour que la progression suive d'un appareil à l'autre : profil anonyme sur Supabase avec un **code de récupération** (pas d'email ni de mot de passe).
 - **Classement hebdomadaire** et **mode classé** en duel avec un Elo simple.
 - **Statistiques de carrière** côté serveur, pour qu'elles ne soient plus perdues quand on vide le navigateur.
 

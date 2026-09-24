@@ -19,7 +19,7 @@
     <div id="topbar"><div id="score-line"></div><div id="score-sub"></div></div>
     <canvas id="minimap"></canvas>
     <div id="killfeed"></div>
-    <div id="crosshair"><i></i><i></i><i></i><i></i></div>
+    <div id="crosshair" class="xh"><i></i><i></i><i></i><i></i><b></b><span></span></div>
     <div id="hitmarker"></div>
     <div id="dmg-nums"></div>
     <div id="dmg-flash"></div>
@@ -84,6 +84,7 @@
         <div class="menu-brand"><h1 class="logo"><span>F</span>PIXEL</h1><p class="tagline">FPS pixel pour jouer entre potes</p></div>
         <div class="menu-tools">
           <div id="status" class="status"><i></i><span>Connexion…</span></div>
+          <button id="open-armory" class="ibtn" title="Skins d'armes" aria-label="Skins d'armes">🎨</button>
           <button id="open-stats" class="ibtn" title="Mes stats" aria-label="Mes stats">📊</button>
           <button id="open-help" class="ibtn" title="Contrôles" aria-label="Contrôles">⌨</button>
           <button id="open-settings" class="ibtn" title="Réglages" aria-label="Réglages">⚙</button>
@@ -204,6 +205,16 @@
     </div>
   </div>
 
+  <!-- ============================ Armurerie (skins) ============================ -->
+  <div id="armory" class="overlay hidden">
+    <div class="panel">
+      <h2>ARMURERIE <small id="armory-sub"></small></h2>
+      <p class="armory-hint">Fais des frags avec une arme pour débloquer ses camouflages. Les autres joueurs voient ton skin. La progression est gardée dans ce navigateur.</p>
+      <div id="armory-list"></div>
+      <button id="close-armory" class="btn primary">OK</button>
+    </div>
+  </div>
+
   <!-- ============================ Boutique (survie) ============================ -->
   <div id="shop" class="overlay hidden">
     <div class="panel">
@@ -236,6 +247,19 @@
       <div class="row"><label for="s-map">Mini-carte (touche M)</label><input id="s-map" type="checkbox"></div>
       <div class="row"><label for="s-auto">Tir automatique (ennemi dans le viseur)</label><input id="s-auto" type="checkbox"></div>
       <div class="row"><label for="s-inv">Inverser l'axe vertical</label><input id="s-inv" type="checkbox"></div>
+      <h3 class="set-h">VISEUR</h3>
+      <div class="xh-edit">
+        <div class="xh-preview" aria-hidden="true"><div id="xh-prev" class="xh"><i></i><i></i><i></i><i></i><b></b><span></span></div></div>
+        <div class="xh-ctrls">
+          <div class="xh-styles" id="xh-styles" role="radiogroup" aria-label="Forme du viseur"></div>
+          <div class="row"><label for="s-xh-size">Taille</label><input id="s-xh-size" type="range" min="2" max="20" step="1"><output id="o-xh-size"></output></div>
+          <div class="row"><label for="s-xh-gap">Écart</label><input id="s-xh-gap" type="range" min="0" max="16" step="1"><output id="o-xh-gap"></output></div>
+          <div class="row"><label for="s-xh-thick">Épaisseur</label><input id="s-xh-thick" type="range" min="1" max="6" step="1"><output id="o-xh-thick"></output></div>
+          <div class="xh-colors" id="xh-colors" role="radiogroup" aria-label="Couleur du viseur"></div>
+          <div class="row"><label for="s-xh-out">Contour noir</label><input id="s-xh-out" type="checkbox"></div>
+          <button id="xh-reset" class="btn small-btn">Viseur par défaut</button>
+        </div>
+      </div>
       <button id="close-settings" class="btn primary">OK</button>
     </div>
   </div>

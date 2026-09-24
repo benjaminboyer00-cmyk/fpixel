@@ -7,21 +7,32 @@ export class ViewModel {
   constructor(scene) {
     this.root = new THREE.Group();
     scene.add(this.root);
-    this.guns = WEAPONS.map((w) => {
-      const g = buildGun(w.id);
-      g.scale.setScalar(0.72);
-      g.visible = false;
-      this.root.add(g);
-      return g;
-    });
     this.flash = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.03), new THREE.MeshBasicMaterial({ color: 0xffe08a }));
     this.flash.visible = false;
+    this.skinKey = null;
+    this.setSkins({});
     this.cur = -1;
     this.kick = 0;
     this.swap = 0;
     this.bobT = 0;
     this.flashT = 0;
     this.setWeapon(0);
+  }
+
+  // skins : { idArme: indexSkin } ; reconstruit les modèles seulement si le choix a changé
+  setSkins(skins) {
+    const key = JSON.stringify(skins);
+    if (key === this.skinKey) return;
+    this.skinKey = key;
+    for (const g of this.guns || []) this.root.remove(g);
+    this.guns = WEAPONS.map((w) => {
+      const g = buildGun(w.id, skins[w.id] || 0);
+      g.scale.setScalar(0.72);
+      g.visible = false;
+      this.root.add(g);
+      return g;
+    });
+    if (this.cur >= 0) { const c = this.cur; this.cur = -1; this.setWeapon(c); }
   }
 
   setWeapon(i) {

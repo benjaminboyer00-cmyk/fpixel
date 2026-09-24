@@ -10,6 +10,8 @@ import { MAPS } from '../shared/map.js';
 import { mountClassPicker } from './classes-ui.js';
 import { mountMenu, readInvite } from './menu.js';
 import { weaponImg } from './weapon-icons.js';
+import { renderArmory, equippedSkins, skinsForServer } from './armory.js';
+import { applyCrosshair, cleanXh, XH_STYLES, XH_COLORS, XH_DEFAULT } from './crosshair.js';
 
 // Stats cumulées, gardées dans ce navigateur (aucun serveur de stockage nécessaire)
 const STATS_KEY = 'fpixel-stats-v1';
@@ -22,9 +24,21 @@ function recordMatch(row, won) { // row = [id, frags, morts, dégâts, précisio
   s.kills += row[1]; s.deaths += row[2]; s.dmg += row[3]; s.head += row[5]; s.best = Math.max(s.best, row[6]);
   try { localStorage.setItem(STATS_KEY, JSON.stringify(s)); } catch { /* navigation privée */ }
 }
+// Frag fait par le joueur (arme utilisée) : fait progresser les skins de cette arme
+function recordKill(wi, head) {
+  const w = WEAPONS[wi];
+  if (!w) return;
+  const s = loadStats();
+  s.wk = s.wk || {}; s.wh = s.wh || {};
+  s.wk[w.id] = (s.wk[w.id] || 0) + 1;
+  if (head) s.wh[w.id] = (s.wh[w.id] || 0) + 1;
+  try { localStorage.setItem(STATS_KEY, JSON.stringify(s)); } catch { /* navigation privée */ }
+}
 
 const $ = (id) => document.getElementById(id);
 const settings = loadSettings();
+settings.skins = settings.skins && typeof settings.skins === 'object' ? { ...settings.skins } : {};
+settings.xh = cleanXh(settings.xh);
 if (isTouch) document.body.classList.add('touch');
 
 const net = new Net();
@@ -56,6 +70,7 @@ function joinMsg() {
     room: settings.lobby === 'friends' || settings.mode === 'survival' ? (settings.room.trim() || (settings.mode === 'survival' ? `solo-${token.slice(0, 10)}` : '')) : '',
     bots: settings.bots ? (settings.fill || 1) : 0, diff: settings.diff, limit: settings.limit, token,
     map: settings.map, cls: settings.cls, loadout: settings.cls === 'custom' ? settings.custom : undefined,
+    sk: skinsForServer(equippedSkins(settings, loadStats())),   // skins d'armes (visuels seulement)
     rid: pendingRid || undefined,   // salon choisi dans la liste « Salons ouverts »
   };
 }
@@ -145,7 +160,7 @@ async function play() {
   setStatus('wait', 'Connexion…');
 
   try {
-    if (!game) { game = new Game({ canvas: $('game'), input, net, hud, getSettings: () => settings }); game.onMatchEnd = recordMatch; game.onShop = () => toggleShop(); game.onShopChange = () => { if (shopOpen) renderShop(); }; }
+    if (!game) { game = new Game({ canvas: $('game'), input, net, hud, getSettings: () => settings }); game.onMatchEnd = recordMatch; game.onMyKill = recordKill; game.getSkins = () => equippedSkins(settings, loadStats()); game.onShop = () => toggleShop(); game.onShopChange = () => { if (shopOpen) renderShop(); }; }
   } catch (e) {
     console.error(e);
     return showMenu("WebGL n'est pas disponible sur cet appareil/navigateur.");
@@ -321,6 +336,48 @@ function openSettings() { settingsOpen = true; $('settings').classList.remove('h
 function closeSettings() { settingsOpen = false; $('settings').classList.add('hidden'); }
 $('pause-settings').addEventListener('click', openSettings);
 $('close-settings').addEventListener('click', closeSettings);
+
+// ---------------------------------------------------------------- viseur ----
+const xhEls = [$('crosshair'), $('xh-prev')];
+const drawXh = () => { for (const e of xhEls) applyCrosshair(e, settings.xh); };
+function renderXhControls() {
+  const x = settings.xh;
+  $('xh-styles').replaceChildren(...XH_STYLES.map(([id, label]) => {
+    const b = Object.assign(document.createElement('button'), { type: 'button', textContent: label, className: x.style === id ? 'sel' : '' });
+    b.setAttribute('role', 'radio'); b.setAttribute('aria-checked', x.style === id ? 'true' : 'false');
+    b.addEventListener('click', () => { x.style = id; xhChanged(); });
+    return b;
+  }));
+  const pick = Object.assign(document.createElement('input'), { type: 'color', value: x.color, title: 'Autre couleur' });
+  pick.addEventListener('input', () => { x.color = pick.value; xhChanged(false); });
+  $('xh-colors').replaceChildren(...XH_COLORS.map((c) => {
+    const b = Object.assign(document.createElement('button'), { type: 'button', title: c, className: x.color.toLowerCase() === c ? 'sel' : '' });
+    b.style.background = c;
+    b.setAttribute('role', 'radio'); b.setAttribute('aria-checked', x.color.toLowerCase() === c ? 'true' : 'false');
+    b.addEventListener('click', () => { x.color = c; xhChanged(); });
+    return b;
+  }), pick);
+  for (const k of ['size', 'gap', 'thick']) { $(`s-xh-${k}`).value = x[k]; $(`o-xh-${k}`).textContent = `${x[k]}px`; }
+  $('s-xh-out').checked = x.outline;
+}
+function xhChanged(rerender = true) {
+  settings.xh = cleanXh(settings.xh);
+  saveSettings(settings);
+  drawXh();
+  if (rerender) renderXhControls();
+}
+for (const k of ['size', 'gap', 'thick']) {
+  $(`s-xh-${k}`).addEventListener('input', () => { settings.xh[k] = Number($(`s-xh-${k}`).value); $(`o-xh-${k}`).textContent = `${settings.xh[k]}px`; xhChanged(false); });
+}
+$('s-xh-out').addEventListener('change', () => { settings.xh.outline = $('s-xh-out').checked; xhChanged(false); });
+$('xh-reset').addEventListener('click', () => { settings.xh = { ...XH_DEFAULT }; xhChanged(); });
+renderXhControls();
+drawXh();
+
+// ---------------------------------------------------------------- armurerie ----
+const showArmory = () => renderArmory($('armory-list'), $('armory-sub'), settings, loadStats(), () => saveSettings(settings));
+$('open-armory').addEventListener('click', () => { showArmory(); $('armory').classList.remove('hidden'); });
+$('close-armory').addEventListener('click', () => $('armory').classList.add('hidden'));
 
 // Outils de test (uniquement avec ?debug dans l'URL)
 if (location.search.includes('debug')) {

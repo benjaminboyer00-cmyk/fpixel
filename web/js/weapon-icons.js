@@ -4,6 +4,7 @@
 //
 // Lettres : . vide  k contour  G métal sombre  g métal  L métal clair  w bois  y jaune  r rouge  b bleu  c cyan
 //           o orange  e vert  p violet  W blanc  d gris foncé (ombre)  n crème (papier)
+import { skinColor } from '../shared/skins.js';
 const PAL = {
   k: '#0a0d12', G: '#3b4453', g: '#6b7686', L: '#a3adbd', w: '#a06b3a', y: '#ffb703', r: '#e5484d', b: '#3e82f7',
   c: '#4fd1e0', o: '#ff7a1a', e: '#46a758', p: '#8e4ec6', W: '#f4f6f8', d: '#222831', n: '#efe7d2',
@@ -309,8 +310,8 @@ const ART = {
 
 export const ICON_W = 24, ICON_H = 12;
 
-// SVG de l'icône (rectangles fusionnés par lignes pour rester léger).
-export function weaponSvg(id) {
+// SVG de l'icône (rectangles fusionnés par lignes pour rester léger). skin : index dans SKINS (contour noir inchangé).
+export function weaponSvg(id, skin = 0) {
   const rows = ART[id] || ART.knife;
   let rects = '';
   rows.forEach((row, y) => {
@@ -319,7 +320,8 @@ export function weaponSvg(id) {
       if (ch === '.' || !PAL[ch]) { x++; continue; }
       let x2 = x + 1;
       while (x2 < ICON_W && row[x2] === ch) x2++;
-      rects += `<rect x="${x}" y="${y}" width="${x2 - x}" height="1" fill="${PAL[ch]}"/>`;
+      const fill = skin && ch !== 'k' ? skinColor(PAL[ch], skin) : PAL[ch];
+      rects += `<rect x="${x}" y="${y}" width="${x2 - x}" height="1" fill="${fill}"/>`;
       x = x2;
     }
   });
@@ -327,16 +329,17 @@ export function weaponSvg(id) {
 }
 
 const cache = new Map();
-export function weaponIcon(id) {
-  let url = cache.get(id);
-  if (!url) { url = `data:image/svg+xml;utf8,${encodeURIComponent(weaponSvg(id))}`; cache.set(id, url); }
+export function weaponIcon(id, skin = 0) {
+  const key = `${id}:${skin | 0}`;
+  let url = cache.get(key);
+  if (!url) { url = `data:image/svg+xml;utf8,${encodeURIComponent(weaponSvg(id, skin | 0))}`; cache.set(key, url); }
   return url;
 }
 
 // Élément <img> prêt à l'emploi (largeur en px ; la hauteur suit le ratio 2:1)
-export function weaponImg(id, width = 48, className = 'w-icon') {
+export function weaponImg(id, width = 48, className = 'w-icon', skin = 0) {
   const img = document.createElement('img');
-  img.className = className; img.alt = ''; img.width = width; img.height = width / 2; img.src = weaponIcon(id); img.draggable = false;
+  img.className = className; img.alt = ''; img.width = width; img.height = width / 2; img.src = weaponIcon(id, skin); img.draggable = false;
   return img;
 }
 

@@ -82,6 +82,43 @@ check('Perso : slots de la carte suivent la liste', document.querySelectorAll('.
 check('sauvegardes déclenchées', saves.length > 5);
 check('aide clavier : touches surlignées', (menu.renderKeyboard(), document.querySelectorAll('#kbd-grid kbd.on').length >= 12));
 
+console.log('[skins]');
+{
+  const { SKINS, skinColor, cleanSkins } = await import('../web/shared/skins.js');
+  const { equippedSkins, skinsForServer, renderArmory, weaponProgress } = await import('../web/js/armory.js');
+  check('skin standard = couleurs d\'origine', skinColor('#3b3f46', 0) === '#3b3f46');
+  check('skin Or : couleur changée et valide', /^#[0-9a-f]{6}$/.test(skinColor('#3b3f46', 5)) && skinColor('#3b3f46', 5) !== '#3b3f46');
+  check('icône avec skin différente de l\'icône standard', weaponSvg('ar', 5) !== weaponSvg('ar') && weaponSvg('ar', 5).includes('#0a0d12'));
+  check('validation serveur : clés et valeurs hors bornes rejetées', JSON.stringify(cleanSkins({ 0: 2, 1: 0, 2: 99, x: 1, 3: 1.5 }, WEAPONS.length)) === '{"0":2}');
+  const stats = { kills: 40, wk: { ar: 30, sniper: 5 } };
+  const st = { skins: { ar: 'foret', sniper: 'or', portal: 'desert' } };
+  const eq = equippedSkins(st, stats);
+  check('skin débloqué porté, skin verrouillé ignoré', eq.ar === 2 && eq.sniper === undefined, JSON.stringify(eq));
+  check('portail : progresse avec les frags totaux / 4', weaponProgress(stats, WEAPONS[W.PORTAL]) === 10 && eq.portal === 1, JSON.stringify(eq));
+  check('format serveur : index d\'arme -> index de skin', skinsForServer(eq)[W.AR] === 2);
+  let saved = 0;
+  renderArmory($('armory-list'), $('armory-sub'), st, stats, () => saved++);
+  const row = [...document.querySelectorAll('.arm-row')].find((r) => r.textContent.includes(WEAPONS[W.AR].name));
+  check('armurerie : une ligne par arme, 7 skins chacune', document.querySelectorAll('.arm-row').length > 10 && row.querySelectorAll('.arm-skin').length === SKINS.length);
+  check('armurerie : Forêt porté, Nuit verrouillé (30/50)', row.querySelectorAll('.arm-skin')[2].classList.contains('sel') && row.querySelectorAll('.arm-skin')[3].classList.contains('locked') && /30\/50/.test(row.querySelectorAll('.arm-skin')[3].textContent));
+  row.querySelectorAll('.arm-skin')[1].click();
+  check('armurerie : choisir Désert enregistre le choix', st.skins.ar === 'desert' && saved === 1);
+  const row2 = [...document.querySelectorAll('.arm-row')].find((r) => r.textContent.includes(WEAPONS[W.AR].name));
+  row2.querySelectorAll('.arm-skin')[4].click();
+  check('armurerie : un skin verrouillé ne se choisit pas', st.skins.ar === 'desert' && saved === 1);
+}
+
+console.log('[viseur]');
+{
+  const { applyCrosshair, cleanXh } = await import('../web/js/crosshair.js');
+  const x = cleanXh({ style: 'circle', size: 99, gap: -3, thick: 'a', color: 'red', outline: false });
+  check('réglage nettoyé (bornes, couleur, forme)', x.style === 'circle' && x.size === 20 && x.gap === 0 && x.thick === 2 && x.color === '#ffffff' && !x.outline, JSON.stringify(x));
+  check('réglage vide = viseur par défaut', JSON.stringify(cleanXh(null)) === JSON.stringify({ style: 'cross', size: 8, gap: 6, thick: 2, color: '#ffffff', outline: true }));
+  applyCrosshair($('crosshair'), { style: 'dot', size: 10, gap: 4, thick: 3, color: '#4dff6a', outline: true });
+  const e = $('crosshair');
+  check('viseur appliqué : forme et variables CSS', e.classList.contains('s-dot') && !e.classList.contains('s-cross') && e.style.getPropertyValue('--xl') === '10px' && e.style.getPropertyValue('--xc') === '#4dff6a');
+}
+
 console.log('[navigateur de salons]');
 document.querySelector('.mode[data-mode="ffa"]').click();
 menu.setLobby({ modes: { ffa: { rooms: [{ rid: 'ffa#3', id: 'salon 3', n: 4, max: 10, bots: 6, map: 'village', auto: true, state: 'playing' }, { rid: 'ffa:vide', id: 'vide', n: 0, max: 10, map: 'arena' }] } } });

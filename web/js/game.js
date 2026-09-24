@@ -148,6 +148,8 @@ export class Game {
     this.nukeAt = 0; this.gas = null;
     this.interp = INTERP_MS; this._jit = 0; this._lastSnapAt = 0;
     if (welcome.gas) this._setGas({ owner: welcome.gas.owner, ms: welcome.gas.ms });
+    this.hud.skins = this.getSkins?.() || {};
+    this.viewmodel.setSkins(this.hud.skins);
     this.viewmodel.setWeapon(this.me.weapon);
     this.hud.setLoadout(loadout);
     this.hud.setStats(null);
@@ -202,7 +204,10 @@ export class Game {
     let p = this.players.get(info.id);
     if (p) return p;
     const color = info.mob ? info.mob.c : playerColor(this.mode, info);
-    const model = buildPlayer(color);
+    // skins envoyés par le serveur : { indexArme: indexSkin } -> { idArme: indexSkin }
+    const skins = {};
+    for (const [wi, si] of Object.entries(info.sk || {})) if (WEAPONS[wi]) skins[WEAPONS[wi].id] = si;
+    const model = buildPlayer(color, skins);
     model.group.visible = false;
     if (info.mob) model.group.scale.setScalar(info.mob.s);
     this.scene.add(model.group);
@@ -486,6 +491,7 @@ export class Game {
     const victim = this.players.get(m.v) ?? (m.v === this.myId ? { name: 'Toi', id: this.myId, team: this.myTeam() } : null);
     const mine = m.a === this.myId || m.v === this.myId;
     this.hud.killfeed(killer, victim, m.w, m.h, mine, this.mode);
+    if (m.a === this.myId && m.v !== this.myId && !this.players.get(m.v)?.mob) this.onMyKill?.(m.w, !!m.h);   // progression des skins
     if (m.v === this.myId) {
       const me = this.me;
       me.alive = false; me.deadT = 0; me.hp = 0; me.killer = m.a;

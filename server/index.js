@@ -16,6 +16,7 @@ import {
   MYSTERY_POOL, MYSTERY_RARE, MYSTERY_RARE_CHANCE,
 } from '../web/shared/config.js';
 import { MAPS, mapById } from '../web/shared/map.js';
+import { cleanSkins } from '../web/shared/skins.js';
 import { rayAABB, applySpread, mulberry32, clamp, shotSeed } from '../web/shared/util.js';
 import { BOT_NAMES, newBotAI, botStep, botClass, computeFlow } from './bots.js';
 import { MOBS, mobPower, waveList, newMobState, mobStep } from './mobs.js';
@@ -271,6 +272,8 @@ function addBot(room) {
   const b = newPlayer(room, id, null, name, pickTeam(room));
   b.bot = true;
   b.ai = newBotAI(room.diff);
+  // un bot sur deux porte un camouflage (les joueurs voient à quoi ressemblent les skins)
+  if (Math.random() < 0.5) { const sk = 1 + ((Math.random() * 4) | 0); b.skins = Object.fromEntries(WEAPONS.map((_, i) => [i, sk])); }
   room.players.set(id, b);
   broadcast(room, { t: 'pjoin', p: publicPlayer(b) });
   spawnPlayer(room, b);
@@ -324,6 +327,7 @@ function afterRosterChange(room) {
 function publicPlayer(p) {
   return {
     id: p.id, name: p.name, team: p.team, k: p.k, d: p.d, hp: p.hp, w: p.weapon, bot: !!p.bot, lvl: shownLevel(p),
+    ...(p.skins && Object.keys(p.skins).length ? { sk: p.skins } : {}),
     ...(p.mob ? { mob: { c: p.mob.color, s: p.mob.scale, max: p.maxHp, t: p.mob.type } } : {}),
   };
 }
@@ -1247,6 +1251,7 @@ function handleMessage(ws, raw) {
       p.cls = resolveClass(m.cls, m.loadout);
       if (token) { p.token = token; tokens.set(token, p); }
     }
+    p.skins = cleanSkins(m.sk, WEAPONS.length);   // purement visuel : on vérifie seulement que les skins existent
     p.sn = randomInt(0, 2 ** 31); p.shotN = 0;   // graines de tir : le serveur les impose (voir shotSeed)
     send(p, {
       t: 'welcome', id: p.id, ts: now, team: p.team, sn: p.sn,

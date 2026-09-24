@@ -49,6 +49,7 @@ async function main() {
     { mode: 'ffa', map: 'toString' }, { mode: 'ffa', map: '__proto__' }, { mode: 'toString' }, { mode: 'constructor' },
     { mode: 'ffa', cls: 'toString' }, { mode: 'ffa', cls: '__proto__' }, { mode: 'ffa', cls: 'custom', loadout: { length: 3 } },
     { mode: ['ffa'] }, { mode: { a: 1 } }, { map: 42 }, { cls: null },
+    { mode: 'ffa', sk: '__proto__' }, { mode: 'ffa', sk: [1, 2] }, { mode: 'ffa', sk: { __proto__: 3, toString: 2, 99999: 1 } },
   ];
   for (const pl of payloads) {
     const c = await open();
@@ -96,6 +97,21 @@ async function main() {
   await sleep(400);
   check('flood (600 msg d\'un coup) : connexion coupée', flood.closed !== null, String(flood.closed));
   check('flood : le serveur tient', await alive());
+
+  console.log('[skins]');
+  {
+    const P = await open(), Q = await open();
+    send(P, { t: 'join', name: 'Skin', mode: 'ffa', room: 'skins', bots: 0, sk: { 0: 3, 1: 99, 2: -1, 3: 1.5, abc: 2, 4: 6 } });
+    await sleep(150);
+    send(Q, { t: 'join', name: 'Voit', mode: 'ffa', room: 'skins', bots: 0 });
+    await sleep(250);
+    const idP = P.log.find((m) => m.t === 'welcome')?.id;
+    const seen = Q.log.find((m) => m.t === 'welcome')?.players.find((p) => p.id === idP);
+    check('skins : seuls les skins valides sont relayés aux autres', JSON.stringify(seen?.sk) === JSON.stringify({ 0: 3, 4: 6 }), JSON.stringify(seen?.sk));
+    const q = Q.log.find((m) => m.t === 'welcome')?.players.find((p) => p.name === 'Voit');
+    check('skins : un joueur sans skin n\'envoie rien de plus', q && q.sk === undefined, JSON.stringify(q));
+    P.ws.close(); Q.ws.close();
+  }
 
   console.log('[tir à travers un mur]');
   // Mur de l'arène : x 12..20, z 9.6..10.4, hauteur 2.4. Tireur au sud du mur, cible au nord.
