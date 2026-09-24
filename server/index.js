@@ -780,7 +780,7 @@ function spawnMob(room, key, now, target = null) {
   const id = nextPlayerId++;
   const p = newPlayer(room, id, null, def.name, 'red');
   p.bot = true;
-  p.mob = { type: key, dmg: pw.dmg, reward: def.reward + Math.floor(S.wave * 0.5), scale: def.scale, color: def.color };
+  p.mob = { type: key, dmg: pw.dmg * (def.dmgMul ?? 1), reward: def.reward + Math.floor(S.wave * 0.5), scale: def.scale, color: def.color };
   p.mst = newMobState(def);
   p.maxHp = Math.max(1, Math.round(def.hp * pw.hp)); p.hp = p.maxHp;
   p.speedMul = def.speed * pw.speed * MOB_SPEED;

@@ -7,6 +7,7 @@ import { lookDir, clamp } from '../web/shared/util.js';
 import { canSee, flowDir, randomRoam } from './bots.js';
 
 // hp / speed (multiplicateur) / melee = { dmg, cd (ms), reach (m) } / weapon = arme à distance (index) avec pref = distance préférée et range = portée
+// dmgMul = multiplicateur de dégâts propre au monstre (1 par défaut)
 // err = imprécision de tir (rad), react = délai avant de tirer (ms), scale = taille, reward = points gagnés par le tueur
 export const MOBS = {
   zombie:   { name: 'Zombie',  hp: 60,   speed: 0.65, melee: { dmg: 14, cd: 900,  reach: 1.8 }, scale: 1.0, color: '#5f9a4a', reward: 10, sight: 45 },
@@ -15,7 +16,7 @@ export const MOBS = {
   brute:    { name: 'Brute',   hp: 380,  speed: 0.55, melee: { dmg: 38, cd: 1200, reach: 2.3 }, scale: 1.5, color: '#9a3a3a', reward: 70, sight: 45 },
   sniper:   { name: 'Tireur',  hp: 60,   speed: 0.55, weapon: W.SNIPER, pref: 40, range: 90, err: 0.03, react: 900, scale: 1.0, color: '#3a5a9a', reward: 45, sight: 100 },
   // Guetteur : n'arrive pas avec les manches, il est envoyé contre les joueurs perchés hors d'atteinte (grue, toits…)
-  lookout:  { name: 'Guetteur', hp: 55,  speed: 0.75, weapon: W.AR, pref: 20, range: 90, err: 0.035, react: 700, scale: 1.0, color: '#e0a526', reward: 30, sight: 110, antiPerch: true },
+  lookout:  { name: 'Guetteur', hp: 55,  speed: 0.75, weapon: W.AR, dmgMul: 0.4, pref: 20, range: 90, err: 0.035, react: 700, scale: 1.0, color: '#e0a526', reward: 30, sight: 110, antiPerch: true },
   boss:     { name: 'Colosse', hp: 2400, speed: 0.5,  melee: { dmg: 60, cd: 1300, reach: 3.2 }, weapon: W.ROCKET, pref: 18, range: 60, err: 0.03, react: 800, scale: 2.0, color: '#7a2a8a', reward: 500, sight: 90 },
 };
 
