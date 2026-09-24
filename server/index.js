@@ -759,12 +759,24 @@ function survMsg(room) {
 }
 
 // Fait apparaître un monstre à l'un des 3 points les plus éloignés des joueurs
-function spawnMob(room, key, now) {
+function spawnMob(room, key, now, target = null) {
   const S = room.surv, def = MOBS[key], pw = mobPower(S.wave, room.diff);
   const humans = [...room.players.values()].filter((q) => !q.bot && q.alive);
   const list = room.map.mobSpawns || room.map.spawns;
-  const scored = list.map((s) => ({ s, d: Math.min(999, ...humans.map((h) => Math.hypot(h.x - s.x, h.z - s.z))) })).sort((a, b) => b.d - a.d).slice(0, 3);
-  const at = scored[(Math.random() * scored.length) | 0].s;
+  let at;
+  if (target) {
+    // Guetteur : apparaît à 18-50 m du perché, de préférence là où il le voit déjà
+    const pts = [...list, ...room.map.spawns];
+    const score = (s) => {
+      const d = Math.hypot(target.x - s.x, target.z - s.z);
+      const edge = Math.max(Math.abs(s.x), Math.abs(s.z)) > room.map.half - 4 ? 25 : 0;   // les points collés à l'enceinte en dernier
+      return (d >= 18 && d <= 50 ? 100 : 0) - Math.abs(d - 30) + (spawnVisible(room.map, target, s, d) ? 60 : 0) - edge + Math.random() * 10;
+    };
+    at = pts.map((s) => ({ s, v: score(s) })).sort((a, b) => b.v - a.v)[0].s;
+  } else {
+    const scored = list.map((s) => ({ s, d: Math.min(999, ...humans.map((h) => Math.hypot(h.x - s.x, h.z - s.z))) })).sort((a, b) => b.d - a.d).slice(0, 3);
+    at = scored[(Math.random() * scored.length) | 0].s;
+  }
   const id = nextPlayerId++;
   const p = newPlayer(room, id, null, def.name, 'red');
   p.bot = true;
@@ -801,6 +813,29 @@ function ensureFlow(room, now, humans) {
   }
 }
 
+// Joueurs perchés hors d'atteinte des monstres (grue du Chantier, toits, dalle…) : au bout de quelques secondes,
+// des Guetteurs (tireurs) sont envoyés contre eux, quelle que soit la manche. Sinon on pourrait camper sans risque.
+const PERCH_Y = 2.4;          // au-dessus : les monstres de corps à corps ne peuvent plus frapper (portée verticale 2,2 m)
+const PERCH_MS = 5000;        // temps perché avant l'arrivée des guetteurs (2 s tout en haut de la grue)
+const PERCH_HIGH_Y = 8;
+function stepPerch(room, S, humans, now) {
+  const perched = [];
+  for (const h of humans) {
+    if (!h.alive || h.y < PERCH_Y) { h.perchSince = 0; h.perched = false; continue; }
+    if (!h.perchSince) h.perchSince = now;
+    h.perched = now - h.perchSince >= (h.y >= PERCH_HIGH_Y ? 2000 : PERCH_MS);
+    if (h.perched) perched.push(h);
+  }
+  if (!perched.length) return;
+  const lookouts = [...room.players.values()].filter((p) => p.mob?.type === 'lookout' && p.alive).length;
+  const want = Math.min(4, perched.length + (perched.some((h) => h.y >= PERCH_HIGH_Y) ? 1 : 0) + (S.wave >= 6 ? 1 : 0));
+  if (lookouts >= want || now < (S.nextLookout || 0)) return;
+  const target = perched[(Math.random() * perched.length) | 0];
+  spawnMob(room, 'lookout', now, target);
+  S.nextLookout = now + 2500;
+  if (!lookouts) for (const h of perched) send(h, { t: 'perch' });   // prévenir le campeur
+}
+
 function stepSurvival(room, now) {
   const S = room.surv;
   if (!S) return;
@@ -817,6 +852,7 @@ function stepSurvival(room, now) {
       broadcast(room, survMsg(room));
     }
   } else {
+    stepPerch(room, S, humans, now);
     if (S.queue.length && live < SURV.MAX_MOBS && now >= S.nextSpawn) {
       spawnMob(room, S.queue.shift(), now);
       S.nextSpawn = now + Math.max(250, 900 - S.wave * 25);

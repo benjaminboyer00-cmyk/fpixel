@@ -726,6 +726,22 @@ async function main() {
     check('coop : pas de tir allié', !C2.has('dmg') && !C1.has('hit'));
     C1.ws.close(); C2.ws.close();
     await sleep(300);
+
+    // campeur sur la grue du Chantier : des Guetteurs (carabine) arrivent et lui tirent dessus, dès la manche 1
+    const G = new Bot('Grutier');
+    await G.connect(); G.join('survival', 'svCrane', 0, { map: 'site' });
+    await G.waitFor('welcome'); await G.waitFor('spawn');
+    await sleep(400);
+    G.pos(19, 14.8, 30.5, Math.PI, 3);                           // en haut de la flèche de la grue
+    await G.waitFor('surv', (m) => m.phase === 'fight', 6000).catch(() => null);
+    const alert = await G.waitFor('perch', null, 6000).catch(() => null);
+    check('grue : le campeur est prévenu (message perch)', !!alert);
+    const lk = await G.waitFor('pjoin', (m) => m.p.mob?.t === 'lookout', 4000).catch(() => null);
+    check('grue : un Guetteur apparaît dès la manche 1', !!lk, JSON.stringify(lk));
+    const shot = await G.waitFor('dmg', (m) => m.a === lk?.p.id, 15000).catch(() => null);
+    check('grue : le Guetteur touche le joueur perché', !!shot);
+    G.ws.close();
+    await sleep(300);
   }
 
   // ---------- GUN GAME ----------

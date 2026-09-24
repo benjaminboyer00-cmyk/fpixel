@@ -315,6 +315,7 @@ export class Game {
       if (prev && m.wave > prev.wave && m.phase === 'fight') { this.hud.hint(`MANCHE ${m.wave} !`, 3500); sfx.play('streak'); }
     });
     n.on('wave', (m) => { this.hud.hint(`Manche ${m.n} terminée ! +${m.bonus} 💰 · B : boutique`, 6000); sfx.play('win'); });
+    n.on('perch', () => { this.hud.hint('🎯 Des guetteurs t\'ont repéré en hauteur : ils arrivent pour te déloger !', 4000); sfx.play('streak'); });
     n.on('cash', (m) => {
       const me = this.me;
       if (!me) return;
