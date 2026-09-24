@@ -101,7 +101,7 @@ function buildArena() {
 }
 
 export const DEFAULT_MAP = 'arena';
-export const mapById = (id) => MAPS[id] || MAPS[DEFAULT_MAP];
+export const mapById = (id) => (typeof id === 'string' && Object.hasOwn(MAPS, id) ? MAPS[id] : MAPS[DEFAULT_MAP]);
 
 // ---------------------------------------------------------------- Village (grande) ----
 function buildVillage() {

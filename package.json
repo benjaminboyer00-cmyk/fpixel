@@ -7,10 +7,15 @@
   "scripts": {
     "start": "node server/index.js",
     "dev": "PORT=7860 node server/index.js",
-    "test": "node test/physics.mjs && node test/smoke.mjs && node test/security.mjs"
+    "test": "node test/physics.mjs && node test/menu.mjs && node test/smoke.mjs && node test/security.mjs"
   },
   "dependencies": {
     "ws": "^8.18.0"
   },
-  "engines": { "node": ">=18" }
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "jsdom": "^26.1.0"
+  }
 }

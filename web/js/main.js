@@ -8,25 +8,19 @@ import { loadSettings, saveSettings, isTouch, SERVER_HOST } from './config.js';
 import { MODES, SHOP, WEAPONS, shopPrice } from '../shared/config.js';
 import { MAPS } from '../shared/map.js';
 import { mountClassPicker } from './classes-ui.js';
+import { mountMenu, readInvite } from './menu.js';
+import { weaponImg } from './weapon-icons.js';
 
 // Stats cumulées, gardées dans ce navigateur (aucun serveur de stockage nécessaire)
 const STATS_KEY = 'fpixel-stats-v1';
 function loadStats() {
   try { return { matches: 0, wins: 0, kills: 0, deaths: 0, dmg: 0, head: 0, best: 0, ...JSON.parse(localStorage.getItem(STATS_KEY) || '{}') }; } catch { return { matches: 0, wins: 0, kills: 0, deaths: 0, dmg: 0, head: 0, best: 0 }; }
 }
-function showStats() {
-  const s = loadStats(), el = document.getElementById('mystats');
-  if (!el) return;
-  el.textContent = s.matches
-    ? `Parties ${s.matches} · Victoires ${s.wins} (${Math.round((100 * s.wins) / s.matches)} %) · Frags ${s.kills} · Morts ${s.deaths} (K/D ${(s.kills / Math.max(1, s.deaths)).toFixed(2)}) · Dégâts ${s.dmg} · Têtes ${s.head} · Meilleure série ${s.best}`
-    : 'Pas encore de partie terminée.';
-}
 function recordMatch(row, won) { // row = [id, frags, morts, dégâts, précision, têtes, série max, arme]
   const s = loadStats();
   s.matches++; if (won) s.wins++;
   s.kills += row[1]; s.deaths += row[2]; s.dmg += row[3]; s.head += row[5]; s.best = Math.max(s.best, row[6]);
   try { localStorage.setItem(STATS_KEY, JSON.stringify(s)); } catch { /* navigation privée */ }
-  showStats();
 }
 
 const $ = (id) => document.getElementById(id);
@@ -43,6 +37,7 @@ let settingsOpen = false;
 let shopOpen = false;
 let reconnecting = false;
 let welcomeWaiter = null;
+let pendingRid = null;   // salon choisi dans le navigateur de salons (pour ce lancement seulement)
 
 // Jeton de reconnexion : permet de reprendre sa place (score, équipe, niveau) après une coupure
 const token = (() => {
@@ -57,71 +52,27 @@ const token = (() => {
 function joinMsg() {
   return {
     t: 'join', name: settings.name, mode: settings.mode,
-    room: settings.room.trim() || (settings.mode === 'survival' ? `solo-${token.slice(0, 10)}` : ''),   // survie : salon privé (solo) sauf si on donne un nom pour jouer en coop
+    // « Entre potes » : salon nommé ; survie : salon privé (solo) sauf si on donne un nom pour jouer en coop
+    room: settings.lobby === 'friends' || settings.mode === 'survival' ? (settings.room.trim() || (settings.mode === 'survival' ? `solo-${token.slice(0, 10)}` : '')) : '',
     bots: settings.bots ? (settings.fill || 1) : 0, diff: settings.diff, limit: settings.limit, token,
     map: settings.map, cls: settings.cls, loadout: settings.cls === 'custom' ? settings.custom : undefined,
+    rid: pendingRid || undefined,   // salon choisi dans la liste « Salons ouverts »
   };
 }
 
 // ---------------------------------------------------------------- menu ----
-$('name').value = settings.name;
-$('room').value = settings.room;
-if (!MODES[settings.mode]) settings.mode = 'ffa';
+if (!Object.hasOwn(MODES, settings.mode)) settings.mode = 'ffa';
+if (!Object.hasOwn(MAPS, settings.map)) settings.map = 'arena';
+if (readInvite(location.search, settings)) { saveSettings(settings); history.replaceState(null, '', location.pathname); }   // lien d'invitation ?room=…&mode=…
+const menu = mountMenu({ settings, save: () => saveSettings(settings), onPlay: () => play(), onOpenSettings: () => openSettings(), loadStats });
 
-// carte + classe (montés avant les modes : selectMode() a besoin de menuPicker.setMode)
-for (const m of Object.values(MAPS)) $('map').append(Object.assign(document.createElement('option'), { value: m.id, textContent: m.name }));
-if (!MAPS[settings.map]) settings.map = 'arena';
-$('map').value = settings.map;
-const showMapDesc = () => { $('map-desc').textContent = MAPS[settings.map].desc; };
-showMapDesc();
-$('map').addEventListener('change', () => { settings.map = $('map').value; showMapDesc(); saveSettings(settings); });
-const menuPicker = mountClassPicker($('cls-picker'), settings, { save: () => saveSettings(settings) });
-
-// Catégories du menu : Multijoueur (duel/équipes/chacun pour soi), Survie, Fun (Gun Game)
-const CATEGORIES = { multi: ['duel', 'tdm', 'ffa'], survie: ['survival'], fun: ['gun'] };
-const catOf = (m) => Object.keys(CATEGORIES).find((c) => CATEGORIES[c].includes(m));
-let lastMultiMode = CATEGORIES.multi.includes(settings.mode) ? settings.mode : 'ffa';
-
-function selectMode(m) {
-  settings.mode = m;
-  if (CATEGORIES.multi.includes(m)) lastMultiMode = m;
-  document.querySelectorAll('.mode').forEach((b) => b.classList.toggle('sel', b.dataset.mode === m));
-  document.querySelectorAll('.cat').forEach((c) => c.classList.toggle('open', c.dataset.cat === catOf(m)));
-  menuPicker.setMode(m); // Gun Game / Survie : la carte montre l'équipement imposé plutôt qu'un choix grisé
-  const surv = m === 'survival';
-  document.querySelector('.f-bots').classList.toggle('hidden', surv);
-  document.querySelector('.f-room').firstChild.textContent = surv ? 'Salon coop ' : 'Salon privé ';
-  const opt = { easy: surv ? 'Monstres faibles' : 'Bots faciles', normal: surv ? 'Monstres normaux' : 'Bots normaux', hard: surv ? 'Monstres coriaces' : 'Bots difficiles' };
-  for (const o of $('diff').options) o.textContent = opt[o.value];
-  if (surv && settings.map === 'arena' && $('map')) { settings.map = 'city'; $('map').value = 'city'; $('map-desc').textContent = MAPS.city.desc; }
-  saveSettings(settings);
-}
-document.querySelectorAll('.mode').forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); selectMode(b.dataset.mode); }));
-document.querySelectorAll('.cat-head[data-mode]').forEach((b) => b.addEventListener('click', () => selectMode(b.dataset.mode)));
-document.querySelector('.cat-head[data-cat="multi"]').addEventListener('click', () => selectMode(lastMultiMode));
-selectMode(settings.mode);
-
-showStats();
 // en partie (pause) : changer de classe, effectif à la prochaine réapparition
 function mountPausePicker() {
   mountClassPicker($('pause-cls'), settings, {
-    save: () => saveSettings(settings),
+    save: () => saveSettings(settings), compact: true,
     onChange: () => net.send({ t: 'class', cls: settings.cls, loadout: settings.cls === 'custom' ? settings.custom : undefined }),
   });
 }
-
-$('bots').checked = settings.bots !== false;
-$('bots').addEventListener('change', () => { settings.bots = $('bots').checked; saveSettings(settings); });
-for (const [id, key, num] of [['diff', 'diff', false], ['limit', 'limit', true], ['fill', 'fill', true]]) {
-  const el = $(id);
-  el.value = String(settings[key]);
-  if (el.value !== String(settings[key])) el.selectedIndex = 0; // valeur enregistrée qui n'existe plus
-  el.addEventListener('change', () => { settings[key] = num ? Number(el.value) : el.value; saveSettings(settings); });
-}
-$('name').addEventListener('input', () => { settings.name = $('name').value; saveSettings(settings); });
-$('room').addEventListener('input', () => { settings.room = $('room').value; saveSettings(settings); });
-$('name').addEventListener('keydown', (e) => { if (e.key === 'Enter') play(); });
-$('room').addEventListener('keydown', (e) => { if (e.key === 'Enter') play(); });
 
 function setStatus(kind, text) {
   const s = $('status');
@@ -133,18 +84,16 @@ async function refreshStatus() {
   if (busy || game?.running) return;
   const lobby = await fetchLobby(6000);
   if (busy || game?.running) return;
+  menu.setLobby(lobby);
   if (!lobby) {
-    setStatus('off', 'Serveur en veille… il se réveille (ça peut prendre ~30 s).');
+    setStatus('off', 'Serveur en veille');
     return;
   }
-  setStatus('on', `Serveur en ligne · ${lobby.online} joueur${lobby.online > 1 ? 's' : ''} connecté${lobby.online > 1 ? 's' : ''}`);
+  setStatus('on', lobby.online ? `${lobby.online} en ligne` : 'En ligne');
   for (const m of Object.keys(MODES)) {
     const e = document.querySelector(`[data-count="${m}"]`);
-    if (e) e.textContent = lobby.modes[m].players ? `${lobby.modes[m].players} en jeu` : '';
+    if (e) e.textContent = lobby.modes[m]?.players ? `${lobby.modes[m].players} en jeu` : '';
   }
-  const multi = ['duel', 'tdm', 'ffa'].reduce((s, m) => s + (lobby.modes[m]?.players || 0), 0);
-  const eMulti = document.querySelector('[data-count="multi"]');
-  if (eMulti) eMulti.textContent = multi ? `${multi} en jeu` : '';
 }
 setInterval(refreshStatus, 6000);
 refreshStatus();
@@ -159,6 +108,7 @@ function showMenu(msg) {
   $('play').disabled = false;
   $('play').textContent = 'JOUER';
   busy = false;
+  menu.render();
   if (msg) setStatus('off', msg); else refreshStatus();
 }
 
@@ -174,6 +124,7 @@ function enterFullscreen() {
 async function play() {
   if (busy) return;
   busy = true;
+  pendingRid = menu.takeJoinRid();
   cancelled = false;
   sfx.init(); // doit être appelé dans un geste utilisateur
   if (isTouch) enterFullscreen();
@@ -185,7 +136,7 @@ async function play() {
 
   $('play').disabled = true;
   $('play').textContent = 'CONNEXION…';
-  setStatus('wait', 'Connexion au serveur…');
+  setStatus('wait', 'Connexion…');
 
   try {
     if (!game) { game = new Game({ canvas: $('game'), input, net, hud, getSettings: () => settings }); game.onMatchEnd = recordMatch; game.onShop = () => toggleShop(); game.onShopChange = () => { if (shopOpen) renderShop(); }; }
@@ -195,7 +146,7 @@ async function play() {
   }
 
   const awake = await wakeServer(
-    (s) => setStatus('wait', `Réveil du serveur… ${s}s (le Space gratuit s'endort quand personne ne joue)`),
+    (s) => { setStatus('wait', `Réveil… ${s} s`); $('play').textContent = `RÉVEIL DU SERVEUR… ${s} s`; },   // le Space gratuit s'endort quand personne ne joue
     () => cancelled,
   );
   if (!awake) return showMenu('Serveur injoignable. Réessaie dans un instant.');
@@ -244,6 +195,7 @@ async function reconnect() {
 }
 
 function onWelcome(m) {
+  pendingRid = null;   // une reconnexion doit reprendre la place (jeton), pas re-cibler le salon choisi
   $('menu').classList.add('hidden');
   welcomeWaiter?.();
   game.start(m);
@@ -307,6 +259,7 @@ function renderShop() {
     const name = it.kind === 'weapon' ? WEAPONS[it.w].name : it.name;
     const div = document.createElement('div');
     div.className = `shop-row${have || maxed ? ' own' : ''}`;
+    if (it.kind === 'weapon') div.prepend(weaponImg(WEAPONS[it.w].id, 44, 'w-icon shop-icon'));
     const b = document.createElement('b'); b.textContent = it.kind === 'up' ? `${name} (${lvl}/${it.max})` : name;
     const small = document.createElement('small'); small.textContent = it.desc || (it.kind === 'weapon' ? `Touche ${me.loadout.length + 1} une fois achetée` : '');
     const p = document.createElement('span'); p.className = 'price'; p.textContent = have ? 'Possédé' : maxed ? 'Max' : `💰 ${price}`;
@@ -360,7 +313,6 @@ $('s-inv').addEventListener('change', () => { settings.invertY = $('s-inv').chec
 
 function openSettings() { settingsOpen = true; $('settings').classList.remove('hidden'); }
 function closeSettings() { settingsOpen = false; $('settings').classList.add('hidden'); }
-$('open-settings').addEventListener('click', openSettings);
 $('pause-settings').addEventListener('click', openSettings);
 $('close-settings').addEventListener('click', closeSettings);
 

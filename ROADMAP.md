@@ -6,7 +6,7 @@ FPIXEL est un FPS multijoueur dans le navigateur, en low-poly pixelisé, pensé 
 
 Le contenu est déjà large pour un projet solo. Il y a cinq modes (chacun pour soi, équipes, duel, Gun Game, Survie en coop avec boutique et manches — le mode Braquage a été retiré), quatre cartes (Arène, Village, Entrepôt, Quartier), sept classes plus une classe Perso à budget de points, une vingtaine d'armes dont plusieurs vraiment originales (portail, grappin, Excalibur et son onde, canon à orbe, avion en papier piloté, missile nucléaire avec gaz), des séries de kills, des bots avec pathfinding et trois niveaux, des monstres, la reconnexion automatique avec jeton et un mode tactile complet.
 
-Le netcode est sain sur le principe. Les tirs sont rejoués côté serveur avec compensation de lag (rembobinage des positions jusqu'à 400 ms), les autres joueurs sont interpolés, et la dispersion est déterministe grâce à une graine imposée par le serveur. Les tests sont sérieux pour un projet perso : une suite physique, un smoke test qui ouvre de vraies connexions WebSocket, et une suite sécurité.
+Le netcode est sain sur le principe. Les tirs sont rejoués côté serveur avec compensation de lag (rembobinage des positions jusqu'à 400 ms), les autres joueurs sont interpolés, et la dispersion est déterministe grâce à une graine imposée par le serveur. Les tests sont sérieux pour un projet perso : une suite physique, un smoke test qui ouvre de vraies connexions WebSocket, une suite sécurité et une suite menu.
 
 Les faiblesses restantes : le déplacement est encore calculé côté client (le serveur ne fait que brider la vitesse, pas encore de simulation autoritaire complète — voir 3.2), `server/index.js` et `web/js/game.js` sont de gros fichiers qui font tout, et il n'existe rien qui fasse revenir un joueur le lendemain (pas de compte, pas de progression, pas de classement).
 
@@ -21,15 +21,29 @@ Les faiblesses restantes : le déplacement est encore calculé côté client (le
 - La dispersion en visée (ADS) est alignée entre client et serveur, ce qui supprime les « touches fantômes » au fusil d'assaut.
 - Les déplacements sont contrôlés. Le serveur tient un budget de distance qui se recharge à la vitesse maximale autorisée. Une téléportation ou un speedhack est refusé, et le client reçoit un message `fix` qui le recale. Le grappin, les explosions et les portails ouvrent une fenêtre plus large, et une coupure réseau de moins d'une seconde passe sans accroc.
 - Des limites anti-abus sont en place : 200 connexions au total, 8 par adresse IP, 40 salons, et un client qui dépasse 400 messages par seconde est coupé.
-- Les salons de Survie en solo ne sont plus listés publiquement. Leur nom dérivait du jeton de reconnexion, et n'importe qui pouvait les rejoindre. Le serveur sait aussi rejoindre un salon précis par son identifiant (`rid`), en prévision d'un futur navigateur de salons côté client.
+- Les salons de Survie en solo ne sont plus listés publiquement. Leur nom dérivait du jeton de reconnexion, et n'importe qui pouvait les rejoindre. Le serveur sait aussi rejoindre un salon précis par son identifiant (`rid`), ce qu'utilise le navigateur de salons du menu.
 
-**Menu**
+**Menu refait de zéro**
 
-Le menu regroupe les modes en 3 catégories (Multijoueur, Survie, Fun) plutôt qu'une liste plate, et le sélecteur de classe est passé de `<select>` à des cartes défilables (PV/vitesse en barres, armes en slots numérotés, fiche d'arme à 4 barres calculée depuis `shared/config.js`, icônes d'armes rendues via un `WebGLRenderer` hors écran à partir des modèles 3D du jeu). Voir le commit qui a introduit ce menu pour le détail ; les idées de navigateur de salons et de lien d'invitation listées en 3.5/3.1 restent à faire côté client.
+- La disposition passe en trois colonnes (mode et carte, arsenal, partie) avec une barre du bas toujours visible. On y trouve le pseudo, un résumé de ce qu'on va lancer et le bouton JOUER. Sur téléphone en paysage, chaque colonne défile de son côté et JOUER ne sort jamais de l'écran.
+- Les cinq modes sont des tuiles directes (les anciennes catégories Multijoueur / Survie / Fun sont retirées).
+- Les cartes s'affichent en vignettes vues du dessus, générées depuis `shared/map.js`. Elles restent justes si une carte change.
+- Choix « Partie rapide » ou « Entre potes », avec un nom de salon et un bouton qui copie un lien d'invitation (`?room=potes&mode=tdm&map=village`) réglant tout pour les amis.
+- Un navigateur de salons liste les salons ouverts du mode choisi (nom, carte, remplissage) et permet de les rejoindre en un clic.
+- Les contrôles s'affichent sur un clavier dessiné, les stats sur une petite grille, et le statut serveur est visible en permanence. Quand le Space dort, le bouton lui-même affiche « RÉVEIL DU SERVEUR… 12 s ».
+
+**Classes et armes**
+
+- Les icônes d'armes sont en vrai pixel art, dessinées à la main sur une grille 24×12, avec contour noir et aplats. Il n'y a plus de rendu WebGL hors écran, donc plus de miniatures floues, de second contexte GPU ni de géométries qui ne sont jamais libérées. Les mêmes icônes servent dans le menu, le HUD, la barre tactile, la boutique et le killfeed.
+- Les cartes de classe ne contiennent plus de boutons imbriqués, se parcourent au clavier et ont les bons rôles ARIA.
+- La fiche d'arme s'affiche en bulle flottante et donne des chiffres justes : dégâts par tir (le sniper n'apparaît plus comme la pire arme), meilleure précision possible (lunette ou visée), portée réelle, étiquettes (Tête = kill, 1 tir = kill, Zone, Utilitaire, Pilotée…).
+- Regarder une arme de sa propre classe ne change plus de classe.
+- La classe Perso ne peut plus se bloquer. Les armes trop chères restent visibles avec « manque 3 pts », un avertissement apparaît si la liste est vide, et JOUER se désactive au lieu de lancer la partie en Classique sans rien dire.
+- Les modes imposés montrent ce qu'on aura vraiment : la frise des niveaux en Gun Game, l'équipement de départ en Survie. En Survie, la difficulté des monstres redevient réglable.
 
 **Tests**
 
-`npm test` lance trois suites (physique, smoke multijoueur, sécurité), toutes vertes.
+`npm test` lance quatre suites (physique, menu en jsdom, smoke multijoueur, sécurité), toutes vertes.
 
 ## 3. Ce qui sépare FPIXEL de Krunker
 

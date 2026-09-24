@@ -1,63 +1,343 @@
-// Icônes d'armes : rendu hors écran des modèles low-poly de models.js (mêmes assets qu'en jeu, rien à dessiner à la main).
-import * as THREE from 'three';
-import { buildGun } from './models.js';
+// Icônes pixel art des armes (vue de profil, canon vers la droite), dessinées à la main sur une grille 24×12.
+// Aucun rendu WebGL : chaque icône est un SVG de rectangles, généré une fois puis mis en cache. Même style que le
+// reste de l'interface (aplats, contour noir, ombre dure), donc net à toutes les tailles avec image-rendering: pixelated.
+//
+// Lettres : . vide  k contour  G métal sombre  g métal  L métal clair  w bois  y jaune  r rouge  b bleu  c cyan
+//           o orange  e vert  p violet  W blanc  d gris foncé (ombre)  n crème (papier)
+const PAL = {
+  k: '#0a0d12', G: '#3b4453', g: '#6b7686', L: '#a3adbd', w: '#a06b3a', y: '#ffb703', r: '#e5484d', b: '#3e82f7',
+  c: '#4fd1e0', o: '#ff7a1a', e: '#46a758', p: '#8e4ec6', W: '#f4f6f8', d: '#222831', n: '#efe7d2',
+};
 
-let renderer = null, scene = null, camera = null;
+// Chaque arme : 12 lignes de 24 caractères.
+const ART = {
+  ar: [
+    '........................',
+    '........................',
+    '..........kkkkkk........',
+    '.kkkkkkkkkLLLLLLkkkkkkk.',
+    'kGGGGGGGGGGGGGGGGGgggggk',
+    'kGGGGGGGGGGGGGGGGGkkkkkk',
+    'kkkkkkkkkGGkkkkkkGGk....',
+    '.....kGGk.kGGk..kkkk....',
+    '.....kGGk..kGGk.........',
+    '.....kkkk..kkkk.........',
+    '........................',
+    '........................',
+  ],
+  shotgun: [
+    '........................',
+    '........................',
+    '........................',
+    '.kkkkkkkkkkkkkkkkkkkkkk.',
+    'kwwwwwwkgggggggggggggggk',
+    'kwwwwwwkGGGGGGGGGGGGGGGk',
+    'kkkkkkkkkkwwwwwwkkkkkkk.',
+    '....kGGk.kwwwwwwk.......',
+    '....kGGk.kkkkkkkk.......',
+    '....kkkk................',
+    '........................',
+    '........................',
+  ],
+  sniper: [
+    '........................',
+    '.......kkkkkkk..........',
+    '.......kcccccck.........',
+    '.kkkkkkkkkkkkkkkkkkkkkkk',
+    'kGGGGGGGGGGGGGGGgggggggk',
+    'kGGGGGGGGGGGGGGGkkkkkkkk',
+    'kkkkkkkkkGGkkkkkkkk.....',
+    '....kGGk.kGGk.kGkGk.....',
+    '....kGGk.kkkk.kkkkk.....',
+    '....kkkk................',
+    '........................',
+    '........................',
+  ],
+  revolver: [
+    '........................',
+    '........................',
+    '........................',
+    '.......kkkkkkkkkkkkkkkk.',
+    '......kLLLLLLLLggggggggk',
+    '......kLLGGGGGkkkkkkkkk.',
+    '......kLkGGGGGk.........',
+    '.......kkGGGkkk.........',
+    '.......kwwwk............',
+    '.......kwwwk............',
+    '........kkk.............',
+    '........................',
+  ],
+  knife: [
+    '........................',
+    '........................',
+    '........................',
+    '........................',
+    '.kkkkkkkkkkkkkkkk.......',
+    'kwwwwwwkLLLLLLLLLkkkkk..',
+    'kwwwwwwkLLLLLLLLLLLLLLk.',
+    'kkkkkkkkWWWWWWWWWWWkkk..',
+    '........kkkkkkkkkkk.....',
+    '........................',
+    '........................',
+    '........................',
+  ],
+  rocket: [
+    '........................',
+    '........................',
+    '.kkkkkkkkkkkkkkkkkkkkkk.',
+    'kggggggggggggggggggkrrrk',
+    'kGGGGGGGGGGGGGGGGGGkrrrk',
+    'kggggggggggggggggggkrrrk',
+    'kkkkkkkkkkkkkkkkkkkkkkk.',
+    '.....kGGk...kGGk........',
+    '.....kGGk...kkkk........',
+    '.....kkkk...............',
+    '........................',
+    '........................',
+  ],
+  excalibur: [
+    '........................',
+    '...........kk...........',
+    '..........kWWk..........',
+    '..........kWLk..........',
+    '..........kWLk..........',
+    '..........kWLk..........',
+    '..........kWLk..........',
+    '.......kkkkyykkkk.......',
+    '.......kyyyyyyyyk.......',
+    '.......kkkkGGkkkk.......',
+    '..........kGGk..........',
+    '..........kkkk..........',
+  ],
+  grapple: [
+    '........................',
+    '........................',
+    '.kkkkkkkkkkkkkkkkk..kk..',
+    'kGGGGGGGGGGGGGGGGGkkLLk.',
+    'kGGGGGGGGGGGGGGGGGLLLLk.',
+    'kGGGGGGGGGGGGGGGGGkkkLk.',
+    'kkkkkkkkkGGkkkkkkk.kLLk.',
+    '.....kGGk.kGGk.....kLk..',
+    '.....kGGk.kkkk....kkk...',
+    '.....kkkk...............',
+    '........................',
+    '........................',
+  ],
+  portal: [
+    '........................',
+    '........................',
+    '.......kkkkkkkkkkk......',
+    '......kWWWWWWWWWWWkkkk..',
+    '.....kWWWWWWWWWWWWkbbbk.',
+    '.....kWWWkkkkkWWWWkookk.',
+    '.....kWWk.....kkkkkkkk..',
+    '......kkkGGGk...........',
+    '.........kGGk...........',
+    '.........kGGk...........',
+    '.........kkkk...........',
+    '........................',
+  ],
+  minigun: [
+    '........................',
+    '..kkkkkkkkkkkkkkkkkkkkk.',
+    '.kGGGGGGGGkgggggggggggk.',
+    '.kGGGGGGGGkGGGGGGGGGGGGk',
+    '.kGGGGGGGGkgggggggggggk.',
+    '.kGGGGGGGGkGGGGGGGGGGGGk',
+    '.kGGGGGGGGkgggggggggggk.',
+    '.kkkkkkkkkkkkkkkkkkkkkk.',
+    '...kGGk.....kGGk........',
+    '...kGGk.....kkkk........',
+    '...kkkk.................',
+    '........................',
+  ],
+  grenade: [
+    '........................',
+    '........................',
+    '.kkkkkkkkkkkkkkkkkkkkk..',
+    'kwwwwwkGGGGGGGGGGGGGGGk.',
+    'kwwwwwkGGkkkkkkkkkGGGGk.',
+    'kwwwwwkGkeeeeeeeekGGGGk.',
+    'kkkkkkkkkeeeeeeeekkkkkk.',
+    '....kGGk.keeeeeek.......',
+    '....kGGk..kkkkkk........',
+    '....kkkk................',
+    '........................',
+    '........................',
+  ],
+  laser: [
+    '........................',
+    '........................',
+    '.kkkkkkkkkkkkkkkkkkk....',
+    'kppppppppppppppppppkkkk.',
+    'kpccccccccccccccccpkcccW',
+    'kppppppppppppppppppkkkk.',
+    'kkkkkkkkkppkkkkkkkkk....',
+    '....kGGk.kppk...........',
+    '....kGGk.kkkk...........',
+    '....kkkk................',
+    '........................',
+    '........................',
+  ],
+  carbine: [
+    '........................',
+    '........kkkkk...........',
+    '........kcccck..........',
+    '.kkkkkkkkkkkkkkkkkkkkkk.',
+    'kwwwwwwwGGGGGGGGGgggggkk',
+    'kwwwwwwwGGGGGGGGGkkkkkk.',
+    'kkkkkkkkkGGkkkkkkk......',
+    '....kwwk.kGGk.kwwk......',
+    '....kwwk.kkkk.kkkk......',
+    '....kkkk................',
+    '........................',
+    '........................',
+  ],
+  flame: [
+    '........................',
+    '........................',
+    '.kkkkkkkkkkkkkkkkk......',
+    'kGGGGGGGGGGGGGGGGGkkk...',
+    'kGrrrrrrrrrGGGGGGGkooko.',
+    'kGrrrrrrrrrGGGGGGGkoyyoo',
+    'kGGGGGGGGGGGGGGGGGkooko.',
+    'kkkkkkkkkkGGkkkkkkkkk...',
+    '....kGGk.kGGk...........',
+    '....kGGk.kkkk...........',
+    '....kkkk................',
+    '........................',
+  ],
+  nuke: [
+    '........................',
+    '........................',
+    '.kk.....kkkkkkkkkkkkkk..',
+    '.kGkkkkkGGGGGGGGGGGGGGkk',
+    '.kGGGGGGGGkykyGGGGGGGGrk',
+    '.kGGGGGGGGyyyyGGGGGGGGrk',
+    '.kGGGGGGGGkykyGGGGGGGGrk',
+    '.kGkkkkkGGGGGGGGGGGGGGkk',
+    '.kk.....kkkkkkkkkkkkkk..',
+    '........................',
+    '........................',
+    '........................',
+  ],
+  frag: [
+    '........................',
+    '..........kkkkk.........',
+    '.........kLkkkkk........',
+    '.........kkeeeek........',
+    '........keeeeeeek.......',
+    '.......keeeeeeeeek......',
+    '.......keekeeeeeek......',
+    '.......keeeeeeeeek......',
+    '........keeeeeeek.......',
+    '.........keeeeek........',
+    '..........kkkkk.........',
+    '........................',
+  ],
+  orb: [
+    '........................',
+    '.kkkkkkkkkkkkkkkkkk.....',
+    'kGGGGGGGGGGGGGGGGGGkkk..',
+    'kGppppppppppppppGGGkppk.',
+    'kGpcccccccccccccpGGkcck.',
+    'kGppppppppppppppGGGkppk.',
+    'kGGGGGGGGGGGGGGGGGGkkk..',
+    'kkkkkkkkkkGGkkkkkkk.....',
+    '....kGGk.kGGk...........',
+    '....kGGk.kkkk...........',
+    '....kkkk................',
+    '........................',
+  ],
+  plane: [
+    '........................',
+    '......kk................',
+    '......knnkk.............',
+    '......knnnnkk...........',
+    '......knnnnnnkk.........',
+    '......knnnnnnnnkkkkkk...',
+    '......knnnnnnnnnnnnnnk..',
+    '......knnkkkkkkkkkkkk...',
+    '......knnk..............',
+    '......knnk..............',
+    '......kkk...............',
+    '........................',
+  ],
+  raygun: [
+    '........................',
+    '........................',
+    '......kkkkkkkkkkkkkkk...',
+    '.....kLLLLLLLLLLLLLLLk..',
+    '.....kLeeeeeeeeeLLLLLLk.',
+    '.....kLLLLLLLLLLLLLLLk..',
+    '......kkkGGGkkkkkkkkk...',
+    '.........kGGk...........',
+    '.........kGGk...........',
+    '.........kkkk...........',
+    '........................',
+    '........................',
+  ],
+  ballista: [
+    '........................',
+    '..............kk........',
+    '.............kwwk.......',
+    '.kkkkkkkkkkkkkwwkkkkkkk.',
+    'kwwwwwwwwGGGGGwwGGggggk.',
+    'kwwwwwwwwGGGGGwwGGkkkkk.',
+    'kkkkkkkkkGGkkkkwwkkk....',
+    '....kwwk.kGGk.kwwk......',
+    '....kwwk.kkkk..kk.......',
+    '....kkkk................',
+    '........................',
+    '........................',
+  ],
+  cheat: [
+    '........................',
+    '..........kkkkkk........',
+    '.........krrrrrrk.......',
+    '..kkkkkkkkGGGGGGkkkkkkk.',
+    '.kGGrrrrrGGGGGGGGGrrrrrk',
+    '.kGGGGGGGGGGGGGGGGkkkkkk',
+    '.kkkkkkkkGGGkkkkGGk.....',
+    '....kGGk.kGGk..kGGk.....',
+    '....kGGk..kGGk.kkkk.....',
+    '....kGGk...kGGk.........',
+    '....kkkk....kkkk........',
+    '........................',
+  ],
+};
+
+export const ICON_W = 24, ICON_H = 12;
+
+// SVG de l'icône (rectangles fusionnés par lignes pour rester léger).
+export function weaponSvg(id) {
+  const rows = ART[id] || ART.knife;
+  let rects = '';
+  rows.forEach((row, y) => {
+    for (let x = 0; x < ICON_W;) {
+      const ch = row[x];
+      if (ch === '.' || !PAL[ch]) { x++; continue; }
+      let x2 = x + 1;
+      while (x2 < ICON_W && row[x2] === ch) x2++;
+      rects += `<rect x="${x}" y="${y}" width="${x2 - x}" height="1" fill="${PAL[ch]}"/>`;
+      x = x2;
+    }
+  });
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${ICON_W} ${ICON_H}" shape-rendering="crispEdges">${rects}</svg>`;
+}
+
 const cache = new Map();
-
-function ensureRenderer() {
-  if (renderer) return;
-  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
-  renderer.setClearColor(0x000000, 0);
-  scene = new THREE.Scene();
-  scene.add(new THREE.HemisphereLight(0xeaf4ff, 0x2a2f24, 1.4));
-  const sun = new THREE.DirectionalLight(0xffffff, 1.5);
-  sun.position.set(2, 3, 2.4);
-  scene.add(sun);
-  camera = new THREE.PerspectiveCamera(32, 1, 0.01, 20);
-}
-
-// Boîte englobante approximative (les modèles n'utilisent que des boîtes ; le build three.js allégé n'a pas Box3),
-// calculée à partir de la position/l'échelle de chaque enfant direct, sans tenir compte d'une éventuelle rotation locale.
-function localBounds(group) {
-  let minX = Infinity, minY = Infinity, minZ = Infinity, maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
-  for (const c of group.children) {
-    const hx = c.scale.x / 2, hy = c.scale.y / 2, hz = c.scale.z / 2;
-    minX = Math.min(minX, c.position.x - hx); maxX = Math.max(maxX, c.position.x + hx);
-    minY = Math.min(minY, c.position.y - hy); maxY = Math.max(maxY, c.position.y + hy);
-    minZ = Math.min(minZ, c.position.z - hz); maxZ = Math.max(maxZ, c.position.z + hz);
-  }
-  return { cx: (minX + maxX) / 2, cy: (minY + maxY) / 2, cz: (minZ + maxZ) / 2, sx: maxX - minX, sy: maxY - minY, sz: maxZ - minZ };
-}
-
-// Rendu 3/4 avant-gauche, cadré automatiquement sur la boîte englobante (marche pour un couteau comme pour un lance-roquettes).
-export function weaponIcon(weaponId, size = 64) {
-  const key = `${weaponId}:${size}`;
-  if (cache.has(key)) return cache.get(key);
-  ensureRenderer();
-  renderer.setSize(size, size, false);
-
-  const inner = buildGun(weaponId);
-  const b = localBounds(inner);
-  inner.position.set(-b.cx, -b.cy, -b.cz); // recentre le modèle sur l'origine du pivot
-
-  const pivot = new THREE.Group();
-  pivot.add(inner);
-  pivot.rotation.y = Math.PI * 0.24;
-  pivot.rotation.x = -0.08;
-  scene.add(pivot);
-
-  const radius = Math.max(b.sx, b.sy, b.sz, 0.05);
-  const dist = radius * 1.9;
-  camera.position.set(dist * 0.6, dist * 0.5, dist * 0.8);
-  camera.near = Math.max(0.01, dist * 0.05);
-  camera.far = dist * 6;
-  camera.lookAt(0, 0, 0);
-  camera.updateProjectionMatrix();
-
-  renderer.render(scene, camera);
-  const url = renderer.domElement.toDataURL('image/png');
-  scene.remove(pivot);
-  cache.set(key, url);
+export function weaponIcon(id) {
+  let url = cache.get(id);
+  if (!url) { url = `data:image/svg+xml;utf8,${encodeURIComponent(weaponSvg(id))}`; cache.set(id, url); }
   return url;
 }
+
+// Élément <img> prêt à l'emploi (largeur en px ; la hauteur suit le ratio 2:1)
+export function weaponImg(id, width = 48, className = 'w-icon') {
+  const img = document.createElement('img');
+  img.className = className; img.alt = ''; img.width = width; img.height = width / 2; img.src = weaponIcon(id); img.draggable = false;
+  return img;
+}
+
+export const ICON_ART = ART; // exporté pour les tests / l'aperçu

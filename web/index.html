@@ -78,134 +78,128 @@
 
   <!-- ============================ Menu ============================ -->
   <div id="menu" class="overlay">
-    <div class="panel">
-      <h1 class="logo"><span>F</span>PIXEL</h1>
-      <p class="tagline">FPS pixel pour jouer entre potes</p>
+    <div class="panel menu-panel">
+      <header class="menu-top">
+        <div class="menu-brand"><h1 class="logo"><span>F</span>PIXEL</h1><p class="tagline">FPS pixel pour jouer entre potes</p></div>
+        <div class="menu-tools">
+          <div id="status" class="status"><i></i><span>Connexion…</span></div>
+          <button id="open-stats" class="ibtn" title="Mes stats" aria-label="Mes stats">📊</button>
+          <button id="open-help" class="ibtn" title="Contrôles" aria-label="Contrôles">⌨</button>
+          <button id="open-settings" class="ibtn" title="Réglages" aria-label="Réglages">⚙</button>
+        </div>
+      </header>
 
-      <label class="field f-name">Pseudo
-        <input id="name" type="text" maxlength="14" placeholder="Ton pseudo" autocomplete="off" spellcheck="false">
-      </label>
-
-      <div class="modes" id="modes">
-        <div class="cat" data-cat="multi">
-          <button class="cat-head" data-cat="multi">
-            <svg class="cat-ill" viewBox="0 0 32 32" aria-hidden="true">
-              <rect x="3" y="17" width="7" height="11" fill="#e5484d"/><rect x="5" y="9" width="5" height="5" fill="#e5484d"/>
-              <rect x="22" y="17" width="7" height="11" fill="#3e82f7"/><rect x="20" y="9" width="5" height="5" fill="#3e82f7"/>
-              <rect x="13" y="18" width="6" height="10" fill="#46a758"/><rect x="14" y="10" width="4" height="5" fill="#46a758"/>
-              <rect x="8" y="5" width="3" height="14" transform="rotate(28 8 5)" fill="#ffb703"/>
-              <rect x="21" y="5" width="3" height="14" transform="rotate(-28 21 5)" fill="#ffb703"/>
-            </svg>
-            <b>⚔ Multijoueur</b><small>Duel · Équipes · Chacun pour soi</small><em data-count="multi"></em>
-          </button>
-          <div class="cat-sub">
-            <button class="mode" data-mode="duel">
-              <svg class="mode-ill" viewBox="0 0 32 32" aria-hidden="true">
-                <rect x="4" y="16" width="8" height="12" fill="#e5484d"/>
-                <rect x="6" y="8" width="6" height="6" fill="#e5484d"/>
-                <rect x="20" y="16" width="8" height="12" fill="#3e82f7"/>
-                <rect x="20" y="8" width="6" height="6" fill="#3e82f7"/>
-                <rect x="9" y="4" width="3" height="16" transform="rotate(28 9 4)" fill="#ffb703"/>
-                <rect x="20" y="4" width="3" height="16" transform="rotate(-28 20 4)" fill="#ffb703"/>
-              </svg>
-              <b>⚔ 1v1</b><small>Duel · 10 frags</small><em data-count="duel"></em>
+      <div class="menu-body">
+        <!-- ---- colonne 1 : le mode ---- -->
+        <section class="col col-modes">
+          <h3>MODE</h3>
+          <div class="modes" id="modes" role="radiogroup" aria-label="Mode de jeu">
+            <button class="mode" data-mode="ffa" role="radio" aria-checked="false">
+              <svg class="mode-ill" viewBox="0 0 32 32" aria-hidden="true"><rect x="4" y="4" width="7" height="7" fill="#e5484d"/><rect x="21" y="4" width="7" height="7" fill="#3e82f7"/><rect x="4" y="21" width="7" height="7" fill="#46a758"/><rect x="21" y="21" width="7" height="7" fill="#ffb703"/><rect x="13" y="13" width="6" height="6" fill="#e8edf3"/></svg>
+              <b>Chacun pour soi</b><small>Tous contre tous</small><em data-count="ffa"></em>
             </button>
-            <button class="mode" data-mode="tdm">
-              <svg class="mode-ill" viewBox="0 0 32 32" aria-hidden="true">
-                <rect x="2" y="2" width="14" height="28" fill="#e5484d"/><rect x="16" y="2" width="14" height="28" fill="#3e82f7"/>
-                <rect x="6" y="6" width="6" height="6" fill="#ff8b8f"/><rect x="6" y="16" width="6" height="6" fill="#ff8b8f"/>
-                <rect x="20" y="6" width="6" height="6" fill="#8fb6ff"/><rect x="20" y="16" width="6" height="6" fill="#8fb6ff"/>
-                <rect x="15" y="2" width="2" height="28" fill="#0a0d12"/>
-              </svg>
-              <b>🔴🔵 Équipes</b><small>Rouge vs Bleu · 30 frags</small><em data-count="tdm"></em>
+            <button class="mode" data-mode="tdm" role="radio" aria-checked="false">
+              <svg class="mode-ill" viewBox="0 0 32 32" aria-hidden="true"><rect x="2" y="2" width="14" height="28" fill="#e5484d"/><rect x="16" y="2" width="14" height="28" fill="#3e82f7"/><rect x="6" y="6" width="6" height="6" fill="#ff8b8f"/><rect x="6" y="16" width="6" height="6" fill="#ff8b8f"/><rect x="20" y="6" width="6" height="6" fill="#8fb6ff"/><rect x="20" y="16" width="6" height="6" fill="#8fb6ff"/><rect x="15" y="2" width="2" height="28" fill="#0a0d12"/></svg>
+              <b>Équipes</b><small>Rouge vs Bleu</small><em data-count="tdm"></em>
             </button>
-            <button class="mode" data-mode="ffa">
-              <svg class="mode-ill" viewBox="0 0 32 32" aria-hidden="true">
-                <rect x="4" y="4" width="7" height="7" fill="#e5484d"/><rect x="21" y="4" width="7" height="7" fill="#3e82f7"/>
-                <rect x="4" y="21" width="7" height="7" fill="#46a758"/><rect x="21" y="21" width="7" height="7" fill="#ffb703"/>
-                <rect x="13" y="13" width="6" height="6" fill="#e8edf3"/>
-              </svg>
-              <b>💀 Chacun pour soi</b><small>Tous contre tous · 20 frags</small><em data-count="ffa"></em>
+            <button class="mode" data-mode="duel" role="radio" aria-checked="false">
+              <svg class="mode-ill" viewBox="0 0 32 32" aria-hidden="true"><rect x="4" y="16" width="8" height="12" fill="#e5484d"/><rect x="6" y="8" width="6" height="6" fill="#e5484d"/><rect x="20" y="16" width="8" height="12" fill="#3e82f7"/><rect x="20" y="8" width="6" height="6" fill="#3e82f7"/><rect x="9" y="4" width="3" height="16" transform="rotate(28 9 4)" fill="#ffb703"/><rect x="20" y="4" width="3" height="16" transform="rotate(-28 20 4)" fill="#ffb703"/></svg>
+              <b>Duel 1v1</b><small>Face à face</small><em data-count="duel"></em>
+            </button>
+            <button class="mode" data-mode="gun" role="radio" aria-checked="false">
+              <svg class="mode-ill" viewBox="0 0 32 32" aria-hidden="true"><rect x="3" y="14" width="22" height="4" fill="#ffb703"/><rect x="23" y="10" width="4" height="4" fill="#ffb703"/><rect x="9" y="18" width="4" height="7" fill="#a06b3a"/><rect x="3" y="11" width="8" height="3" fill="#8b97a8"/><rect x="26" y="20" width="3" height="3" fill="#e8edf3"/><rect x="26" y="25" width="3" height="3" fill="#e8edf3"/></svg>
+              <b>Gun Game</b><small>Une arme par niveau</small><em data-count="gun"></em>
+            </button>
+            <button class="mode" data-mode="survival" role="radio" aria-checked="false">
+              <svg class="mode-ill" viewBox="0 0 32 32" aria-hidden="true"><rect x="9" y="4" width="14" height="12" fill="#3f7a3b"/><rect x="9" y="8" width="3" height="3" fill="#0a0d12"/><rect x="20" y="8" width="3" height="3" fill="#0a0d12"/><rect x="12" y="13" width="8" height="2" fill="#0a0d12"/><rect x="7" y="16" width="18" height="10" fill="#5f9a4a"/><rect x="3" y="18" width="5" height="4" fill="#5f9a4a"/><rect x="24" y="18" width="5" height="4" fill="#5f9a4a"/><rect x="17" y="1" width="3" height="4" fill="#3f7a3b"/><rect x="12" y="1" width="3" height="4" fill="#3f7a3b"/></svg>
+              <b>Survie</b><small>Coop · manches · boutique</small><em data-count="survival"></em>
             </button>
           </div>
-        </div>
-        <div class="cat" data-cat="survie">
-          <button class="cat-head" data-cat="survie" data-mode="survival">
-            <svg class="cat-ill" viewBox="0 0 32 32" aria-hidden="true">
-              <rect x="9" y="4" width="14" height="12" fill="#3f7a3b"/>
-              <rect x="9" y="8" width="3" height="3" fill="#0a0d12"/><rect x="20" y="8" width="3" height="3" fill="#0a0d12"/>
-              <rect x="12" y="13" width="8" height="2" fill="#0a0d12"/>
-              <rect x="7" y="16" width="18" height="10" fill="#5f9a4a"/>
-              <rect x="3" y="18" width="5" height="4" fill="#5f9a4a"/><rect x="24" y="18" width="5" height="4" fill="#5f9a4a"/>
-              <rect x="17" y="1" width="3" height="4" fill="#3f7a3b"/><rect x="12" y="1" width="3" height="4" fill="#3f7a3b"/>
-            </svg>
-            <b>🧟 Survie</b><small>Manches infinies · solo ou coop · boutique</small><em data-count="survival"></em>
-          </button>
-        </div>
-        <div class="cat" data-cat="fun">
-          <button class="cat-head" data-cat="fun" data-mode="gun">
-            <svg class="cat-ill" viewBox="0 0 32 32" aria-hidden="true">
-              <rect x="3" y="14" width="22" height="4" fill="#ffb703"/>
-              <rect x="23" y="10" width="4" height="4" fill="#ffb703"/>
-              <rect x="9" y="18" width="4" height="7" fill="#a58b62"/>
-              <rect x="3" y="11" width="8" height="3" fill="#8b97a8"/>
-            </svg>
-            <b>🔫 Fun : Gun Game</b><small>Une arme par niveau · le couteau gagne</small><em data-count="gun"></em>
-          </button>
-        </div>
+          <div class="mode-desc" id="mode-desc"></div>
+          <h3 class="h-map">CARTE</h3>
+          <div class="maps" id="map-picker" role="radiogroup" aria-label="Carte"></div>
+        </section>
+
+        <!-- ---- colonne 2 : l'arsenal ---- -->
+        <section class="col col-arsenal">
+          <h3>ARSENAL <small id="arsenal-sub"></small></h3>
+          <div id="cls-picker"></div>
+        </section>
+
+        <!-- ---- colonne 3 : la partie ---- -->
+        <section class="col col-lobby">
+          <h3>PARTIE</h3>
+          <div class="seg" role="radiogroup" aria-label="Type de partie">
+            <button class="seg-btn" data-lobby="quick" role="radio" aria-checked="true">Partie rapide</button>
+            <button class="seg-btn" data-lobby="friends" role="radio" aria-checked="false">Entre potes</button>
+          </div>
+          <p class="lobby-hint" id="lobby-hint">Tu rejoins un salon public avec les mêmes réglages.</p>
+          <div id="friends-box" class="friends hidden">
+            <label class="field">Nom du salon
+              <div class="room-row">
+                <input id="room" type="text" maxlength="12" placeholder="ex : potes" autocomplete="off" spellcheck="false">
+                <button id="copy-link" class="btn small" type="button" title="Copier un lien d'invitation">🔗 Lien</button>
+              </div>
+            </label>
+            <small class="opt">Même nom = même salon. Le lien d'invitation règle tout pour tes potes.</small>
+          </div>
+          <div class="rooms" id="rooms-box">
+            <h4>SALONS OUVERTS <small id="rooms-count"></small></h4>
+            <div class="rooms-list" id="rooms-list"></div>
+          </div>
+          <div class="lobby-opts" id="lobby-opts">
+            <label class="check" id="f-bots-row"><input id="bots" type="checkbox"> Compléter avec des bots</label>
+            <div class="opt-grid">
+              <label class="field" id="f-diff">Difficulté
+                <select id="diff" aria-label="Difficulté">
+                  <option value="easy">Facile</option><option value="normal">Normal</option><option value="hard">Difficile</option>
+                </select>
+              </label>
+              <label class="field" id="f-limit">Objectif
+                <select id="limit">
+                  <option value="0">Par défaut</option><option value="5">5 frags</option><option value="10">10 frags</option>
+                  <option value="20">20 frags</option><option value="30">30 frags</option><option value="50">50 frags</option>
+                </select>
+              </label>
+              <label class="field" id="f-fill">Joueurs
+                <select id="fill">
+                  <option value="0">Auto</option><option value="4">4</option><option value="6">6</option><option value="8">8</option><option value="10">10</option>
+                </select>
+              </label>
+            </div>
+          </div>
+        </section>
       </div>
 
-      <div class="f-loadout">
-        <div class="field f-class" id="f-class"><span>Classe</span><div id="cls-picker"></div></div>
-        <div class="field f-map" id="f-map"><span>Carte</span>
-          <select id="map" aria-label="Carte"></select>
-          <div class="cls-desc" id="map-desc"></div>
-        </div>
+      <!-- barre du bas : toujours visible -->
+      <footer class="menu-bar">
+        <input id="name" type="text" maxlength="14" placeholder="Ton pseudo" autocomplete="off" spellcheck="false" aria-label="Pseudo">
+        <div class="menu-summary" id="menu-summary"></div>
+        <button id="play" class="btn primary">JOUER</button>
+      </footer>
+    </div>
+  </div>
+
+  <!-- ============================ Contrôles ============================ -->
+  <div id="help" class="overlay hidden">
+    <div class="panel">
+      <h2>CONTRÔLES</h2>
+      <div class="desktop-only">
+        <div class="kbd-grid" id="kbd-grid"></div>
+        <p class="kbd-legend" id="kbd-legend"></p>
+        <p class="help-p">Portable sans souris : <b>flèches</b> pour viser, <b>F</b> pour tirer, et le <b>tir automatique</b> (réglages) tire tout seul quand un ennemi est dans le viseur.</p>
       </div>
+      <p class="touch-only help-p"><b>Joystick gauche</b> bouger (à fond = sprint) · <b>Glisser à droite</b> viser · <b>FEU</b> tirer (glisse dessus pour viser en tirant) · <b>ZOOM</b> pour le sniper · <b>ACCR.</b> s'accroupir</p>
+      <button id="close-help" class="btn primary">OK</button>
+    </div>
+  </div>
 
-      <label class="field f-room">Salon privé <span class="opt">(optionnel — même nom = même salon)</span>
-        <input id="room" type="text" maxlength="12" placeholder="ex : potes" autocomplete="off" spellcheck="false">
-      </label>
-
-      <div class="f-bots">
-        <label class="check"><input id="bots" type="checkbox"> Compléter avec des bots</label>
-        <select id="diff" aria-label="Difficulté des bots">
-          <option value="easy">Bots faciles</option>
-          <option value="normal">Bots normaux</option>
-          <option value="hard">Bots difficiles</option>
-        </select>
-      </div>
-      <details class="opts">
-        <summary>Options du salon <small>(appliquées par celui qui crée le salon)</small></summary>
-        <label class="field">Objectif (frags pour gagner)
-          <select id="limit">
-            <option value="0">Par défaut selon le mode</option>
-            <option value="5">5</option><option value="10">10</option><option value="20">20</option>
-            <option value="30">30</option><option value="50">50</option>
-          </select>
-        </label>
-        <label class="field">Joueurs visés (humains + bots)
-          <select id="fill">
-            <option value="0">Auto selon le mode</option>
-            <option value="4">4</option><option value="6">6</option><option value="8">8</option><option value="10">10</option>
-          </select>
-        </label>
-      </details>
-
-      <button id="play" class="btn primary">JOUER</button>
-      <button id="open-settings" class="btn">Réglages (sensibilité…)</button>
-      <div id="status" class="status"><i></i><span>Connexion au serveur…</span></div>
-
-      <details class="help" id="mystats-box">
-        <summary>Mes stats</summary>
-        <p id="mystats"></p>
-      </details>
-
-      <details class="help">
-        <summary>Contrôles</summary>
-        <p class="desktop-only"><b>ZQSD / WASD</b> bouger · <b>Souris</b> viser · <b>Clic gauche</b> (ou <b>F</b> / <b>Entrée</b>) tirer · <b>Clic droit</b> zoom sniper · <b>Espace</b> sauter · <b>Maj (Shift)</b> sprinter · <b>C</b> s'accroupir · <b>R</b> recharger · <b>1-9 / molette</b> armes · <b>Clic droit</b> ou <b>E</b> tir secondaire (portail orange, onde d'Excalibur) · <b>G</b> grenade · <b>B</b> boutique (survie) · <b>6 / 7 / 8</b> armes de série (5 / 10 / 15 kills d'affilée) · <b>Tab</b> scores · <b>M</b> mini-carte · <b>Échap</b> pause<br>Portable sans souris : <b>flèches</b> pour viser, <b>F</b> pour tirer, et le <b>tir automatique</b> (réglages) tire tout seul quand un ennemi est dans le viseur.</p>
-        <p class="touch-only"><b>Joystick gauche</b> bouger (à fond = sprint) · <b>Glisser à droite</b> viser · <b>FEU</b> tirer (glisse dessus pour viser en tirant) · <b>ZOOM</b> pour le sniper · <b>ACCR.</b> s'accroupir</p>
-      </details>
+  <!-- ============================ Stats ============================ -->
+  <div id="stats" class="overlay hidden">
+    <div class="panel small">
+      <h2>MES STATS</h2>
+      <div id="mystats" class="stats-grid"></div>
+      <button id="close-stats" class="btn primary">OK</button>
     </div>
   </div>
 

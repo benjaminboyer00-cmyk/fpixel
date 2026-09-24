@@ -68,7 +68,7 @@ async function main() {
   for (let r = 0; r < 6; r++) {
     await Promise.all(Array.from({ length: 6 }, async () => {
       const c = await open();
-      send(c, { t: 'join', name: 'f', mode: pick(['ffa', 'duel', 'tdm', 'gun', 'survival', 'heist']), bots: pick([0, 1, 4]) });
+      send(c, { t: 'join', name: 'f', mode: pick(['ffa', 'duel', 'tdm', 'gun', 'survival']), bots: pick([0, 1, 4]) });
       for (let k = 0; k < 30; k++) {
         for (let j = 0; j < 4; j++) { const m = { t: pick(types) }; for (let q = 0; q < 6; q++) m[pick(keys)] = val(); send(c, m); }
         await sleep(25);
