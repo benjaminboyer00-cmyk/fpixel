@@ -81,6 +81,10 @@ function buildArena() {
   mirror4(14, 18, 1.2, 1.2, 4, 0, 'pillar');    // pilier
   mirror4(22, 20, 3, 3, 2.4, 0, 'stone');       // bloc
 
+  // Abris devant les apparitions d'équipe : on ne se fait plus abattre depuis le centre à peine réapparu
+  mirror4(5.5, 22.5, 4, 0.6, 1.4, 0, 'stone');
+  mirror4(19.5, 22.5, 3, 0.6, 1.4, 0, 'stone');
+
   // Points d'apparition. team: 'red' | 'blue' | null (null = utilisé seulement hors mode équipe)
   const spawns = [];
   for (const x of [-22, -11, 0, 11, 22]) {
@@ -96,7 +100,13 @@ function buildArena() {
   return {
     id: 'arena', name: 'Arène', desc: 'Petite carte symétrique, combats rapprochés',
     half, boxes, spawns, interiors: [],
-    sky: '#9ec9f0', fog: [30, 95], floor: '#5d7f4a',
+    sky: '#9ec9f0', fog: [30, 95], floor: '#5d7f4a', floorKind: 'grass',
+    // chemins de terre battue : les trois couloirs se lisent d'un coup d'œil
+    patches: [
+      { x0: -2, x1: 2, z0: -28, z1: 28, color: '#7d6a4c', kind: 'dirt' },
+      { x0: -26, x1: 26, z0: -1.5, z1: 1.5, color: '#7d6a4c', kind: 'dirt' },
+      { x0: -4, x1: 4, z0: -4, z1: 4, color: '#8b8f96', kind: 'tiles' },
+    ],
   };
 }
 
@@ -137,6 +147,10 @@ function buildVillage() {
   for (const sx of [1, -1]) {
     for (const sz of [1, -1]) {
       const r = house(sx * 17, sz * 15, 10, 8, [sz > 0 ? 'n' : 's', sx > 0 ? 'w' : 'e'], 'brick');
+      // escalier extérieur jusqu'au toit (3e niveau de jeu) + parapet côté place pour s'y abriter
+      for (let i = 1; i <= 7; i++) span(sx > 0 ? r.x1 + 0.3 : r.x0 - 1.5, sx > 0 ? r.x1 + 1.5 : r.x0 - 0.3, sz * (19.5 - i) - 0.5, sz * (19.5 - i) + 0.5, 0, 0.48 * i, 'wood');
+      const px = sx > 0 ? r.x0 - 0.3 : r.x1 - 0.1;
+      span(px, px + 0.4, r.z0 - 0.3, r.z1 + 0.3, 3.35, 4.15, 'brickDark');
       // mobilier : table + caisse dans la maison
       add(sx * 17, sz * 15, 1.6, 0.9, 0.85, 0, 'wood');
       add(sx * 20, sz * 17, 1, 1, 1, 0, 'crateDark');
@@ -185,7 +199,12 @@ function buildVillage() {
   return {
     id: 'village', name: 'Village', desc: 'Grande carte : maisons à traverser, tours de guet, places ouvertes',
     half, boxes, spawns, interiors,
-    sky: '#b8d8f0', fog: [45, 130], floor: '#7a9a55',
+    sky: '#b8d8f0', fog: [45, 130], floor: '#7a9a55', floorKind: 'grass',
+    patches: [
+      { x0: -9, x1: 9, z0: -8, z1: 8, color: '#9a8f7a', kind: 'tiles' },     // place pavée
+      { x0: -2.5, x1: 2.5, z0: -44, z1: 44, color: '#7d6a4c', kind: 'dirt' },
+      { x0: -44, x1: 44, z0: -2, z1: 2, color: '#7d6a4c', kind: 'dirt' },
+    ],
   };
 }
 
@@ -204,6 +223,8 @@ function buildWarehouse() {
   }
   add(0, 0, 9.2, 9.2, 0.35, 3, 'roof');
   add(0, 0, 1.6, 0.9, 0.85, 0, 'wood');
+  // passerelles qui relient le toit du bureau aux coursives : un couloir en hauteur au milieu (on passe dessous)
+  for (const s of [1, -1]) boxes.push({ x0: s > 0 ? 4.6 : -18.5, x1: s > 0 ? 18.5 : -4.6, z0: -1, z1: 1, y0: 2.75, y1: 3.05, c: 'platform' });
 
   // Passerelles surélevées (haut 3) sur les côtés, escaliers aux deux bouts, garde-corps côté mur
   for (const sx of [1, -1]) {
@@ -237,7 +258,8 @@ function buildWarehouse() {
   return {
     id: 'warehouse', name: 'Entrepôt', desc: 'Petite carte intérieure : conteneurs, couloirs et passerelles',
     half, boxes, spawns, interiors: [],
-    sky: '#23262c', fog: [10, 48], floor: '#57575c',
+    sky: '#23262c', fog: [10, 48], floor: '#57575c', floorKind: 'tiles', indoor: true,
+    patches: [{ x0: -6, x1: 6, z0: -26, z1: 26, color: '#6a6a5a', kind: 'tiles' }],
   };
 }
 
@@ -273,6 +295,9 @@ function buildCity() {
   for (const sx of [1, -1]) {
     for (const sz of [1, -1]) {
       building(sx * 24, sz * 24, 14, 12, [sz > 0 ? 'n' : 's', sx > 0 ? 'w' : 'e'], 'brick');
+      // escalier extérieur vers le toit (face extérieure) + parapet côté place : postes de tir en hauteur
+      for (let i = 1; i <= 8; i++) span(sx > 0 ? 31.3 : -32.5, sx > 0 ? 32.5 : -31.3, sz * (30.5 - i) - 0.5, sz * (30.5 - i) + 0.5, 0, 0.47 * i, 'concrete');
+      span(sx > 0 ? 16.7 : -17.1, sx > 0 ? 17.1 : -16.7, sz > 0 ? 17.7 : -30.3, sz > 0 ? 30.3 : -17.7, 3.75, 4.55, 'brickDark');
       building(sx * 48, sz * 24, 12, 14, [sx > 0 ? 'w' : 'e', sz > 0 ? 'n' : 's'], 'plaster');
       building(sx * 24, sz * 48, 14, 10, [sz > 0 ? 'n' : 's'], 'brickDark');
       building(sx * 48, sz * 48, 12, 12, [sx > 0 ? 'w' : 'e'], 'concrete');
@@ -329,8 +354,92 @@ function buildCity() {
   return {
     id: 'city', name: 'Quartier', desc: 'Très grande carte : rues, immeubles et place centrale (multi et survie)',
     half, boxes, spawns, mobSpawns, interiors,
-    sky: '#a9c4dd', fog: [60, 170], floor: '#6b6e75',
+    sky: '#a9c4dd', fog: [60, 170], floor: '#8a8c90', floorKind: 'tiles',
+    patches: [{ x0: -9, x1: 9, z0: -9, z1: 9, color: '#a59b86', kind: 'tiles' }],
   };
 }
 
-export const MAPS = { arena: buildArena(), village: buildVillage(), warehouse: buildWarehouse(), city: buildCity() };
+// ---------------------------------------------------------------- Chantier (moyenne, 3 couloirs, 3 niveaux) ----
+// Pensée pour le mouvement : trois couloirs bien distincts, un bâtiment en construction au centre (rez-de-chaussée
+// ouvert + dalle à l'étage), des conteneurs sur la gauche, un échafaudage sur la droite. Symétrique en Z (équité rouge/bleu).
+function buildSite() {
+  const half = 34;
+  const { boxes, add, span, enclose } = builder(half);
+  enclose(6, 'concrete');
+  // pose une boîte et son reflet côté bleu (z -> -z)
+  const both = (cx, cz, w, d, h, y0 = 0, c = 'crate') => { add(cx, cz, w, d, h, y0, c); if (cz !== 0) add(cx, -cz, w, d, h, y0, c); };
+  const bothSpan = (x0, x1, z0, z1, y0, y1, c) => { span(x0, x1, z0, z1, y0, y1, c); span(x0, x1, -z1, -z0, y0, y1, c); };
+
+  // ---- centre : bâtiment en construction. Poteaux, dalle d'étage à 3,35 m avec une trémie au milieu
+  for (const x of [-8.6, -3, 3, 8.6]) for (const z of [-5.6, 5.6]) add(x, z, 0.8, 0.8, 3.0, 0, 'concrete');
+  span(-9, 9, -6, -1.5, 3.0, 3.35, 'concrete');
+  span(-9, 9, 1.5, 6, 3.0, 3.35, 'concrete');
+  span(-9, -3, -1.5, 1.5, 3.0, 3.35, 'concrete');
+  span(3, 9, -1.5, 1.5, 3.0, 3.35, 'concrete');
+  // parapets de l'étage face aux apparitions (avec une ouverture au milieu pour tirer)
+  for (const s of [1, -1]) {
+    span(-9, -1.6, s > 0 ? 5.6 : -6, s > 0 ? 6 : -5.6, 3.35, 4.3, 'concrete');
+    span(1.6, 9, s > 0 ? 5.6 : -6, s > 0 ? 6 : -5.6, 3.35, 4.3, 'concrete');
+  }
+  // escaliers est : deux volées qui montent vers le milieu (une par camp)
+  for (let i = 1; i <= 7; i++) bothSpan(9.05, 10.45, -7.5 + i - 0.5, -7.5 + i + 0.5, 0, Math.min(3.35, 0.48 * i), 'stairs');
+  // accès ouest en sautant de caisse en caisse (1,1 m puis 2,2 m puis la dalle)
+  both(-10.6, -3, 1.3, 1.3, 1.1, 0, 'crate');
+  both(-9.65, -1.1, 1.3, 1.3, 2.2, 0, 'crateDark');
+  // rez-de-chaussée : quelques couverts
+  both(-5.5, -2.5, 1.2, 1.2, 1.2, 0, 'crate');
+  both(5.5, -2.5, 2.4, 0.8, 1.0, 0, 'rubble');
+  add(0, 0, 1.6, 1.6, 1.0, 0, 'rubble');
+
+  // ---- couloir gauche : parc à conteneurs (niveau intermédiaire à 2,6 m)
+  add(-23, 0, 6, 2.5, 2.6, 0, 'tarp');                         // conteneur en travers du milieu
+  both(-22, -14, 2.5, 6, 2.6, 0, 'metal');
+  both(-27, -6, 6, 2.5, 2.6, 0, 'metal');
+  both(-27, -6, 6, 2.5, 2.6, 2.6, 'tarp');                      // empilé : mur haut
+  both(-17, -5.5, 2.5, 5, 2.6, 0, 'metal');                     // conteneur grimpable…
+  both(-17, -8.7, 1.3, 1.3, 1.25, 0, 'crate');                  // …par cette caisse
+  both(-30.5, -16, 3, 3, 1.2, 0, 'crateDark');
+  both(-30.5, -16, 1.5, 1.5, 1.2, 1.2, 'crate');
+  both(-13.5, -13, 0.5, 5, 2.4, 0, 'concrete');                 // mur entre gauche et centre
+
+  // ---- couloir droit : échafaudage (passerelle à 2,5 m, on passe dessous) et sacs de sable
+  span(24.5, 27.5, -10, 10, 2.2, 2.5, 'scaffold');
+  for (const z of [-9.5, -3.2, 3.2, 9.5]) for (const x of [24.7, 27.3]) add(x, z, 0.25, 0.25, 2.2, 0, 'scaffold');
+  for (let i = 1; i <= 5; i++) bothSpan(24.5, 27.5, -10 - i, -9 - i, 0, 0.5 * (6 - i), 'stairs');   // la marche la plus haute touche la passerelle
+  span(24.5, 27.5, -0.2, 0.2, 2.5, 3.4, 'tarp');                // bâche au milieu de la passerelle : casse la ligne de vue
+  both(19.5, -6, 3.5, 0.9, 1.0, 0, 'rubble');
+  both(19.5, -15, 3.5, 0.9, 1.0, 0, 'rubble');
+  both(31, -4, 2.2, 4, 1.1, 0, 'steel');                        // tas de poutrelles
+  add(20, 0, 1.2, 1.2, 1.2, 0, 'crate');
+  both(13.5, -13, 0.5, 5, 2.4, 0, 'concrete');                  // mur entre droite et centre
+
+  // ---- abords des apparitions : couverts pour ne pas être tiré dès la réapparition
+  both(0, -23, 8, 0.7, 1.3, 0, 'rubble');
+  both(-12, -24.5, 5, 2.5, 2.6, 0, 'metal');
+  both(12, -24.5, 5, 2.5, 2.6, 0, 'tarp');
+  both(-24, -24, 1.2, 1.2, 1.2, 0, 'crate');
+  both(24, -24, 1.2, 1.2, 1.2, 0, 'crate');
+  // grue (décor) dans un coin : repère visuel pour s'orienter
+  add(30.5, 30.5, 1.4, 1.4, 15, 0, 'steel');
+  add(19, 30.5, 22, 1.0, 0.8, 14, 'steel');
+
+  const spawns = [];
+  for (const x of [-20, -10, 0, 10, 20]) {
+    spawns.push({ x, z: -30, yaw: Math.PI, team: 'red' });
+    spawns.push({ x, z: 30, yaw: 0, team: 'blue' });
+  }
+  for (const sx of [1, -1]) for (const sz of [1, -1]) spawns.push({ x: sx * 31, z: sz * 12, yaw: sx > 0 ? Math.PI / 2 : -Math.PI / 2, team: null });
+
+  return {
+    id: 'site', name: 'Chantier', desc: 'Moyenne : 3 couloirs, dalle à l\'étage, conteneurs et échafaudage (idéale pour glisser)',
+    half, boxes, spawns, interiors: [],
+    sky: '#c3d3e2', fog: [35, 115], floor: '#8a7a5f', floorKind: 'dirt',
+    patches: [
+      { x0: -12, x1: 12, z0: -9, z1: 9, color: '#9a9da3', kind: 'tiles' },
+      { x0: -3, x1: 3, z0: -32, z1: -9, color: '#9a9da3', kind: 'tiles' },
+      { x0: -3, x1: 3, z0: 9, z1: 32, color: '#9a9da3', kind: 'tiles' },
+    ],
+  };
+}
+
+export const MAPS = { arena: buildArena(), village: buildVillage(), warehouse: buildWarehouse(), site: buildSite(), city: buildCity() };

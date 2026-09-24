@@ -52,7 +52,7 @@ const menu = mountMenu({ settings, save: () => saves.push(1), onPlay: () => { pl
 const $ = (id) => document.getElementById(id);
 check('tuile TDM sélectionnée', document.querySelector('.mode[data-mode="tdm"]').classList.contains('sel'));
 check('résumé : mode, carte, frags, salon', /Match à mort.*Village.*30 frags.*lespotes/.test($('menu-summary').textContent), $('menu-summary').textContent);
-check('4 vignettes de carte avec un SVG', $('map-picker').querySelectorAll('.map-tile svg').length === Object.keys(MAPS).length);
+check('une vignette SVG par carte', $('map-picker').querySelectorAll('.map-tile svg').length === Object.keys(MAPS).length);
 check('vignette : les boîtes de la carte sont dessinées', mapThumbSvg(MAPS.arena).split('<rect').length > 30);
 document.querySelector('.mode[data-mode="survival"]').click();
 check('Survie : le réglage des monstres est visible', !$('f-diff').classList.contains('hidden') && $('f-diff').firstChild.textContent.trim() === 'Monstres');

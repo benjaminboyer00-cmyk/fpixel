@@ -4,7 +4,7 @@
 
 FPIXEL est un FPS multijoueur dans le navigateur, en low-poly pixelisé, pensé pour jouer entre potes. Le client est statique (Vercel) et le serveur est un process Node avec une seule dépendance (`ws`) qui tourne sur un Space Hugging Face gratuit. Il n'y a ni build ni framework, three.js est vendorisé, et tout le code partagé (armes, cartes, physique de l'avion) vit dans `web/shared/` pour que le client et le serveur calculent exactement la même chose.
 
-Le contenu est déjà large pour un projet solo. Il y a cinq modes (chacun pour soi, équipes, duel, Gun Game, Survie en coop avec boutique et manches — le mode Braquage a été retiré), quatre cartes (Arène, Village, Entrepôt, Quartier), sept classes plus une classe Perso à budget de points, une vingtaine d'armes dont plusieurs vraiment originales (portail, grappin, Excalibur et son onde, canon à orbe, avion en papier piloté, missile nucléaire avec gaz), des séries de kills, des bots avec pathfinding et trois niveaux, des monstres, la reconnexion automatique avec jeton et un mode tactile complet.
+Le contenu est déjà large pour un projet solo. Il y a cinq modes (chacun pour soi, équipes, duel, Gun Game, Survie en coop avec boutique et manches — le mode Braquage a été retiré), cinq cartes (Arène, Village, Entrepôt, Chantier, Quartier), sept classes plus une classe Perso à budget de points, une vingtaine d'armes dont plusieurs vraiment originales (portail, grappin, Excalibur et son onde, canon à orbe, avion en papier piloté, missile nucléaire avec gaz), des séries de kills, des bots avec pathfinding et trois niveaux, des monstres, la reconnexion automatique avec jeton et un mode tactile complet.
 
 Le netcode est sain sur le principe. Les tirs sont rejoués côté serveur avec compensation de lag (rembobinage des positions jusqu'à 400 ms), les autres joueurs sont interpolés, et la dispersion est déterministe grâce à une graine imposée par le serveur. Les tests sont sérieux pour un projet perso : une suite physique, un smoke test qui ouvre de vraies connexions WebSocket, une suite sécurité et une suite menu.
 
@@ -51,15 +51,19 @@ Krunker n'est pas meilleur parce qu'il a plus d'armes. Il l'est parce que chaque
 
 ### 3.1 Sensation de jeu
 
-C'est le plus important et c'est là que Krunker est imbattable. Le mouvement y est une compétence : glissade au sol qui conserve la vitesse, bunny hop avec contrôle aérien, saut accroupi, strafe qui accélère. Chez FPIXEL le mouvement est correct mais plat.
+C'est le plus important et c'est là que Krunker est imbattable. Le mouvement y est une compétence : glissade au sol qui conserve la vitesse, bunny hop avec contrôle aérien, saut accroupi, strafe qui accélère.
 
-- Ajouter une **glissade** (Maj + C en sprint) avec une impulsion initiale et une décélération lente, plus un léger boost en sortant de pente.
-- Ajouter du **contrôle aérien** façon Quake (accélération vers la direction souhaitée plafonnée par projection) pour que le strafe en l'air ait du sens.
-- **Coyote time** (100 ms) et **tampon de saut** (100 ms) pour que les sauts répondent toujours.
-- **Mouvement de l'arme** (bobbing, balancement sur la souris, recul qui remonte la vue puis revient) et **FOV dynamique** en sprint.
-- **Retour de tir** plus fort : son de hitmarker distinct pour la tête, chiffres de dégâts flottants, léger ralenti de l'écran sur un kill, son de kill cumulatif pour les séries.
+**Fait (septembre 2026)** :
+- **Glissade** : C en plein sprint au sol. Départ à sprint × 1,2, décélération lente (5 m/s²), silhouette et caméra basses, recharge de 1,1 s. Sauter pendant la glissade garde l'élan (7 % perdu à chaque saut enchaîné), donc le « slide-hop » existe mais ne s'emballe pas.
+- **Contrôle aérien** façon Quake : en l'air, on accélère vers la direction voulue sans jamais freiner l'élan acquis (plafonné à la vitesse de départ).
+- **Coyote time** (100 ms) et **saut mémorisé** (120 ms).
+- **FOV dynamique** (+5 % en sprint, +10 % en glissade), petite secousse de caméra et son à l'atterrissage d'une chute.
+- **Retours de tir** : chiffres de dégâts flottants (cumulés pour les plombs d'un même tir, jaunes pour la tête, rouges pour le kill), marqueur de touche jaune pour la tête.
+- Côté serveur, la glissade est annoncée (`{t:'slide'}`, au plus une par seconde) et n'ouvre qu'un petit bonus de vitesse de 0,9 s : le contrôle anti-speedhack reste aussi strict.
 
-Tout ça se joue dans `web/js/physics.js` et `game.js`. Comme la physique devra aussi tourner côté serveur (voir 3.2), il faut la déplacer dans `web/shared/` dès maintenant.
+**Reste à faire** : mouvement de l'arme (balancement, recul qui remonte la vue puis revient), léger ralenti sur un kill, sons de kill qui montent avec la série, glissade sur mobile plus lisible (bouton dédié).
+
+La physique (`web/js/physics.js`) devra passer dans `web/shared/` pour le serveur autoritaire (voir 3.2). Les réglages de « sensation » n'agissent que si `p.feel` est vrai (joueur local), les bots gardent l'ancienne physique.
 
 ### 3.2 Serveur autoritaire
 
@@ -69,11 +73,19 @@ La cible est le modèle classique des FPS compétitifs. Le client envoie ses ent
 
 À faire en même temps : calculer le temps de rembobinage depuis le RTT mesuré plutôt que de prendre la valeur du client, et passer les snapshots en binaire (ArrayBuffer, positions quantifiées sur 16 bits, envoi en delta) dès qu'on vise plus de dix joueurs par salon.
 
-### 3.3 Contenu et lisibilité
+### 3.3 Contenu, cartes et lisibilité
 
-- **Cartes** : Krunker vit de cartes compactes avec beaucoup de verticalité et des lignes de vue nettes. Il faudrait deux ou trois nouvelles cartes pensées pour le mouvement (rampes, toits, trous), et à terme un **éditeur de cartes** dans le navigateur. Le format `boxes` actuel s'y prête parfaitement, puisqu'une carte n'est qu'une liste de boîtes.
-- **Lisibilité** : un contour de couleur sur les ennemis (rouge) et les alliés (bleu), une silhouette visible au travers des fumées de grenade, et des effets de tir moins chargés sur mobile.
-- **Réticule personnalisable** (taille, écart, couleur, point) et **sensibilités par arme**.
+**Fait (septembre 2026)** :
+- **Rendu des cartes** (`web/js/world.js`) : une texture pixel dessinée par matériau (briques, planches, tôle nervurée, pierre, tuiles…), ombre de contact au pied des murs, variation de teinte d'une boîte à l'autre, et un sol peint d'un seul tenant avec des chemins, des places pavées, des routes avec trottoirs et pointillés, et des **ombres portées précalculées** (soleil fixe). Toutes les boîtes d'un même matériau sont fusionnées en un seul maillage : une dizaine de draw calls au lieu de plusieurs centaines sur Quartier.
+- **Tracé** : trois niveaux de jeu là où il n'y en avait qu'un. Toits accessibles avec parapet sur les grandes maisons du Village et sur les 4 immeubles autour de la place du Quartier, passerelle centrale en hauteur dans l'Entrepôt, abris devant les apparitions d'équipe dans l'Arène.
+- **Apparitions** : le serveur écarte les points qu'un ennemi voit (ligne de vue jusqu'à 45 m), fini les « spawn kills » en face de l'ennemi.
+- **Nouvelle carte Chantier** (68 × 68 m) : trois couloirs bien distincts (parc à conteneurs, bâtiment en construction avec dalle à l'étage, échafaudage), trois niveaux, symétrique en Z, couverts devant les apparitions. Pensée pour la glissade.
+
+**Reste à faire** :
+- Tester les cartes en vraie partie et ajuster (durée moyenne entre deux rencontres, lignes de vue trop longues, positions trop fortes).
+- Un **éditeur de cartes** dans le navigateur (une carte n'est qu'une liste de boîtes) et le partage de cartes par lien.
+- **Lisibilité** : contour de couleur sur les ennemis et les alliés, silhouette visible dans la fumée, effets allégés sur mobile.
+- **Réticule personnalisable** (taille, écart, couleur, point) et **sensibilité par arme**.
 - **Killcam** de trois secondes (le serveur a déjà l'historique des positions) et **spectateur** entre deux vies en duel.
 
 ### 3.4 Progression et raison de revenir
@@ -104,16 +116,20 @@ Le lien d'invitation et le navigateur de salons sont posés. Les prochaines éta
 
 ## 4. Ordre conseillé
 
-1. **Déployer cette version** et vérifier dans les logs du Space que `X-Forwarded-For` est bien présent. Sans lui, tous les joueurs partageraient la même IP et la limite de 8 par IP bloquerait le neuvième. `MAX_PER_IP=1000` désactive la limite en attendant.
-2. **Sensation de jeu** (glissade, contrôle aérien, coyote time, retours de tir). C'est ce qui donne envie de rejouer, et ça reste côté client.
-3. **Physique partagée et serveur autoritaire**. C'est le plus gros chantier, et il débloque l'anti-triche, les munitions serveur et la killcam.
-4. **Comptes, XP et classement** avec Supabase.
-5. **Nouvelles cartes et éditeur**.
-6. **Serveur toujours allumé et multi-régions** quand il y a du monde.
+Ce que les joueurs attendent d'un FPS en navigateur, par ordre d'impact : un mouvement qui récompense la maîtrise (fait en partie), des retours de tir nets (fait), des cartes lisibles à trois couloirs et plusieurs niveaux (fait sur 5 cartes, à valider en jeu), un jeu juste (serveur autoritaire), une raison de revenir (progression, classement), et de quoi jouer avec ses potes sans friction (lien d'invitation fait, chat et groupe à faire).
+
+1. **Jouer entre potes sur les nouvelles cartes** et noter ce qui coince (couloirs trop longs, positions trop fortes, glissade trop forte ou trop faible). Les réglages sont en haut de `web/js/physics.js` et de `game.js` (`SLIDE_*`).
+2. **Progression** : XP par partie, niveaux, défis quotidiens, camouflages d'armes (les icônes pixel s'y prêtent), avec des comptes légers sur Supabase. C'est ce qui manque le plus pour faire revenir les joueurs.
+3. **Killcam + réticule personnalisable + contours ennemis** : peu de code, gros gain de confort.
+4. **Physique partagée et serveur autoritaire** : le plus gros chantier. Il débloque l'anti-triche complet, les munitions côté serveur et une killcam exacte.
+5. **Éditeur de cartes** et cartes de la communauté.
+6. **Serveur toujours allumé et multi-régions** quand il y a du monde (le Space gratuit s'endort).
 
 ## 5. Pièges à garder en tête
 
 - Tout ce qui est affiché au joueur doit venir de `shared/config.js`, comme la fiche d'arme maintenant. Des chiffres écrits à la main divergent dès le premier rééquilibrage.
 - Une recherche du type `objet[entrée_utilisateur]` doit toujours passer par `Object.hasOwn`. C'est exactement ce qui faisait tomber le serveur.
-- Un nouveau mouvement rapide (dash, tremplin, téléporteur) doit appeler `moveBoost` ou `resetMove` côté serveur, sinon le contrôle des déplacements recalera les joueurs honnêtes.
+- Un nouveau mouvement rapide (dash, tremplin, téléporteur) doit appeler `moveBoost` ou `resetMove` côté serveur, sinon le contrôle des déplacements recalera les joueurs honnêtes. La glissade passe par le message `slide` (bonus limité à une fois par seconde).
+- Une boîte avec `y0 >= 1,8` (dalle, passerelle) est ignorée par la grille de navigation des bots : ils passent dessous mais ne montent pas dessus.
+- Les positions de test du smoke test sont codées en dur sur l'Arène (couloir x = -15) : vérifier qu'un nouveau décor ne les coupe pas.
 - Les tests qui téléportent des joueurs doivent tourner avec `MOVE_CHECK=0`, comme le smoke test.

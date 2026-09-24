@@ -62,7 +62,7 @@ export function summaryText(settings) {
 // ---- clavier ----
 const KEYS = [
   ['Échap', 'Pause'], ['1‑9', 'Armes'], ['Tab', 'Scores'],
-  ['Z', 'Avancer'], ['Q', 'Gauche'], ['S', 'Reculer'], ['D', 'Droite'], ['Espace', 'Sauter'], ['Maj', 'Sprint'], ['C', 'Accroupi'],
+  ['Z', 'Avancer'], ['Q', 'Gauche'], ['S', 'Reculer'], ['D', 'Droite'], ['Espace', 'Sauter'], ['Maj', 'Sprint'], ['C', 'Accroupi · glissade en sprint'],
   ['R', 'Recharger'], ['F', 'Tirer'], ['E', 'Tir 2 / portail'], ['G', 'Grenade'], ['B', 'Boutique / banque'], ['V', 'Voiture'], ['M', 'Mini-carte'],
 ];
 const ROWS = [['Échap', '1‑9', 'Tab'], ['A', 'Z', 'E', 'R', 'T'], ['Q', 'S', 'D', 'F', 'G'], ['Maj', 'W', 'X', 'C', 'V', 'B'], ['Espace']];

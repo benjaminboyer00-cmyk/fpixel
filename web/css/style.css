@@ -328,6 +328,12 @@ body.aiming #crosshair i:nth-child(4) { width: 6px; left: 3px; }
 #hitmarker::after { transform: rotate(-45deg); }
 #hitmarker.on { opacity: 1; transition: none; }
 #hitmarker.kill::before, #hitmarker.kill::after { background: var(--red); }
+#hitmarker.head::before, #hitmarker.head::after { background: #ffd166; }
+#dmg-nums { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.dnum { position: absolute; transform: translate(-50%, -50%); font-weight: 700; font-size: 18px; color: #fff; text-shadow: 2px 2px 0 #000; animation: dnum .8s ease-out forwards; }
+.dnum.head { color: #ffd166; font-size: 22px; }
+.dnum.kill { color: #ff6b70; }
+@keyframes dnum { from { opacity: 1; transform: translate(-50%, -50%) scale(1.25); } 30% { transform: translate(calc(-50% + var(--dx) * .4), -110%) scale(1); } to { opacity: 0; transform: translate(calc(-50% + var(--dx)), -260%) scale(.9); } }
 #dmg-flash { position: absolute; inset: 0; opacity: 0; background: radial-gradient(ellipse at center, transparent 40%, rgba(229, 72, 77, .75) 100%); transition: opacity .35s; }
 #dmg-flash.on { opacity: 1; transition: none; }
 #dmg-arrow { position: absolute; top: 50%; left: 50%; width: 0; height: 0; opacity: 0; transition: opacity .6s; }

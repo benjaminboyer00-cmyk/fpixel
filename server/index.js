@@ -338,6 +338,15 @@ function scoreMsg(room) {
   };
 }
 
+const SPAWN_SIGHT = 45;   // au-delà, un ennemi qui voit le point d'apparition n'est pas une menace immédiate
+// L'ennemi q voit-il le point d'apparition s (de ses yeux au torse d'un joueur debout) ?
+function spawnVisible(map, q, s, d) {
+  if (d < 0.5) return true;
+  const oy = q.y + 1.6, ty = 1.2;
+  const dx = (s.x - q.x) / d, dz = (s.z - q.z) / d, dy = (ty - oy) / d, l = Math.hypot(dx, dy, dz);
+  return rayMap(map, q.x, oy, q.z, dx / l, dy / l, dz / l, d * l).t >= d * l - 0.3;
+}
+
 function pickSpawn(room, p) {
   const others = [...room.players.values()].filter((q) => q !== p && q.alive);
   const enemies = others.filter((q) => !room.cfg.teams || q.team !== p.team);
@@ -345,11 +354,16 @@ function pickSpawn(room, p) {
   let pool = spawns.filter((s) => (room.cfg.teams ? s.team === p.team : true));
   if (!pool.length) pool = spawns;
   const scored = pool.map((s) => {
-    let dmin = 1e9;
-    for (const q of enemies) dmin = Math.min(dmin, Math.hypot(q.x - s.x, q.z - s.z));
+    let dmin = 1e9, seen = 0;
+    for (const q of enemies) {
+      const d = Math.hypot(q.x - s.x, q.z - s.z);
+      dmin = Math.min(dmin, d);
+      if (d < SPAWN_SIGHT && spawnVisible(room.map, q, s, d)) seen++;
+    }
     // jamais sur quelqu'un (coéquipier compris) : sinon les joueurs apparaissent empilés
     const taken = others.some((q) => Math.hypot(q.x - s.x, q.z - s.z) < 2.5);
-    return { s, dmin: dmin + Math.random() * 6 - (taken ? 1000 : 0) }; // un peu d'aléatoire pour ne pas être prévisible
+    // un point vu par un ennemi est fortement déconseillé : c'est ce qui donne les « spawn kills »
+    return { s, dmin: Math.min(dmin, 60) + Math.random() * 6 - seen * 45 - (taken ? 1000 : 0) }; // un peu d'aléatoire pour ne pas être prévisible
   });
   scored.sort((a, b) => b.dmin - a.dmin);
   return scored[0].s;
@@ -522,7 +536,8 @@ function hitNormal(box, px, py, pz) {
 // vitesse max autorisée (sprint × bonus de classe + marge). Un saut de position plus grand que le budget est refusé et le
 // client est recalé ({t:'fix'}). Seau percé plafonné à ~1 s de course : une coupure réseau (paquets en rafale) passe sans
 // accroc, un speedhack ou une téléportation non. Grappin et explosions ouvrent une fenêtre plus large (moveBoost / resetMove).
-const MOVE_SLACK = 2.5;                                   // mètres de tolérance permanente
+const MOVE_SLACK = 2.5;
+const SLIDE_EVERY_MS = 1000;                              // glissade : le client en annonce au plus une par seconde                                   // mètres de tolérance permanente
 function resetMove(p, now) { p.mv = { t: now, budget: 1e9 }; }  // prochaine position acceptée telle quelle (réapparition…)
 function moveBoost(p, now, ms, speed) {
   const active = now < (p.boostUntil || 0);
@@ -1292,6 +1307,10 @@ function handleMessage(ws, raw) {
     }
   } else if (m.t === 'fire') {
     handleFire(p, m, now);
+  } else if (m.t === 'slide') {          // glissade annoncée : courte fenêtre de vitesse (au plus une par seconde)
+    if (!p.alive || now < (p.slideReady || 0)) return;
+    p.slideReady = now + SLIDE_EVERY_MS;
+    moveBoost(p, now, 900, WALK_SPEED * SPRINT_MUL * (p.speedMul || 1) * 0.15);   // petit bonus : la glissade décélère vite, le plafond normal suffit presque
   } else if (m.t === 'nade') {
     handleNade(p, m, now);
   } else if (m.t === 'buy') {

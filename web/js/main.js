@@ -63,7 +63,13 @@ function joinMsg() {
 // ---------------------------------------------------------------- menu ----
 if (!Object.hasOwn(MODES, settings.mode)) settings.mode = 'ffa';
 if (!Object.hasOwn(MAPS, settings.map)) settings.map = 'arena';
-if (readInvite(location.search, settings)) { saveSettings(settings); history.replaceState(null, '', location.pathname); }   // lien d'invitation ?room=…&mode=…
+if (readInvite(location.search, settings)) {   // lien d'invitation ?room=…&mode=… : lu une fois puis retiré de l'URL
+  saveSettings(settings);
+  const keep = new URLSearchParams(location.search);
+  for (const k of ['room', 'mode', 'map']) keep.delete(k);    // on garde les réglages techniques (debug, server)
+  const q = keep.toString().replace(/=(&|$)/g, '$1');
+  history.replaceState(null, '', location.pathname + (q ? `?${q}` : ''));
+}
 const menu = mountMenu({ settings, save: () => saveSettings(settings), onPlay: () => play(), onOpenSettings: () => openSettings(), loadStats });
 
 // en partie (pause) : changer de classe, effectif à la prochaine réapparition

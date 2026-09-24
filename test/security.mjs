@@ -148,7 +148,9 @@ async function main() {
   // Le nombre exact de recalages dépend du timing fin (au plus 4/s) et peut varier de ±1 sous charge : on vérifie
   // seulement qu'au moins un recalage a bien été déclenché, pas un compte précis.
   S.log.length = 0;
-  for (let i = 0; i < 75; i++) { x += 0.6 * dir; send(S, { t: 'in', x, y: 0, z, yaw: 0, pitch: 0, w: 0 }); await sleep(33); }
+  // allers-retours de 12 m : la bordure de l'arène ne peut plus « absorber » la course, quel que soit le point d'apparition
+  let sd = dir;
+  for (let i = 0; i < 75; i++) { if (i % 20 === 19) sd = -sd; x += 0.6 * sd; send(S, { t: 'in', x, y: 0, z, yaw: 0, pitch: 0, w: 0 }); await sleep(33); }
   await sleep(200);
   check('speedhack ×3 : freiné (au moins un recalage envoyé)', S.log.some((m) => m.t === 'fix'), String(S.log.filter((m) => m.t === 'fix').length));
   S.ws.close();

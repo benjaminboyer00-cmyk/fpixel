@@ -197,6 +197,12 @@ class Sfx {
         this._tone({ dur: 0.08, freq: 880, type: 'square', gain: 0.25, out });
         this._tone({ dur: 0.14, freq: 1320, type: 'square', gain: 0.25, out, delay: 0.08 });
         break;
+      case 'slide':
+        this._burst({ dur: 0.45, type: 'bandpass', freq: 700, freqEnd: 250, q: 0.6, gain: 0.3, out });
+        break;
+      case 'land':
+        this._burst({ dur: 0.08, type: 'lowpass', freq: 500, freqEnd: 120, gain: 0.45, out });
+        break;
       case 'hurt':
         this._tone({ dur: 0.18, freq: 160, freqEnd: 70, type: 'sawtooth', gain: 0.5, out });
         break;

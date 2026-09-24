@@ -17,6 +17,9 @@ import { Minimap } from './minimap.js';
 import { stepPlane, PLANE } from '../shared/plane.js';
 
 const MAX_TRACER = 90;
+const SLIDE_MS = 700;            // durée d'une glissade
+const SLIDE_COOLDOWN_MS = 1100;  // délai avant la suivante
+const SLIDE_BOOST = 1.2;         // vitesse de départ = sprint × 1,2 (annoncée au serveur : message 'slide')
 
 export class Game {
   constructor({ canvas, input, net, hud, getSettings }) {
@@ -98,7 +101,8 @@ export class Game {
     const w = WEAPONS[this.me?.weapon ?? 0];
     const me = this.me;
     const base = this.baseVFov();
-    const target = me?.scoped && w.zoom ? w.zoom : me?.aiming && w.ads ? base * w.ads.zoomMul : base;
+    const kick = me?.sliding ? 1.1 : me?.sprinting && (me.speed2d || 0) > WALK_SPEED ? 1.05 : 1;   // la vitesse se sent
+    const target = me?.scoped && w.zoom ? w.zoom : me?.aiming && w.ads ? base * w.ads.zoomMul : base * kick;
     this.fov = snap || !this.fov ? target : this.fov + (target - this.fov) * 0.35;
     if (snap || Math.abs(this.camera.fov - this.fov) > 0.01) {
       this.camera.fov = this.fov;
@@ -135,6 +139,7 @@ export class Game {
       level, loadout, maxHp: MAX_HP, speedMul: 1, nades: 0, nadeReady: 0, cash: 0, up: { hp: 0, dmg: 0, spd: 0 }, charging: false, chargeAt: 0, flight: null, lastPc: 0, preYaw: 0, prePitch: 0, pull: null, portalUntil: 0, stunUntil: 0, altUntil: {}, jumpPrev: false,
       hp: MAX_HP, alive: false, spawned: false, weapon: loadout[0], ammo: WEAPONS.map((w) => w.mag),
       reloadUntil: 0, nextFire: 0, switchUntil: 0, scoped: false, aiming: false, scopeToggle: false, crouch: false, sprinting: false,
+      feel: true, sliding: false, slideUntil: 0, slideReady: 0, airMax: 0, wasGround: true, fallVy: 0,
       respawnAt: 0, killer: null, deadT: 0, prot: 0, lastSend: 0,
     };
     for (const p of welcome.players) this._addPlayer(p);
@@ -270,12 +275,15 @@ export class Game {
     n.on('spawn', (m) => this._onSpawn(m));
     n.on('shot', (m) => this._onRemoteShot(m));
     n.on('hit', (m) => {
-      this.hud.hitmarker(m.k);
+      this.hud.hitmarker(m.k, m.h);
       if (m.k || m.h || performance.now() - this._predAt > 400) sfx.play(m.k ? 'kill' : m.h ? 'headshot' : 'hit');
       const v = this.players.get(m.v);
       if (v && v.model.group.visible) {
         const g = v.model.group.position;
         this.fx.burst(g.x, g.y + (m.h ? 1.6 : 1.1), g.z, '#c62d32', m.k ? 14 : 5, 3.5);
+        // chiffre de dégâts flottant au-dessus de la cible (jaune = tête)
+        const sp = this._v.set(g.x, g.y + (m.h ? 1.9 : 1.4), g.z).project(this.camera);
+        if (m.d > 0 && sp.z < 1) this.hud.dmgNumber((sp.x + 1) / 2, (1 - sp.y) / 2, m.d, !!m.h, !!m.k);
       }
     });
     n.on('dmg', (m) => this._onDamage(m));
@@ -446,7 +454,7 @@ export class Game {
     if (!me) return;
     me.x = m.x; me.y = m.y; me.z = m.z; me.vx = me.vy = me.vz = 0;
     me.yaw = m.yaw; me.pitch = 0;
-    me.hp = m.hp; me.alive = true; me.spawned = true; me.deadT = 0; me.killer = null;
+    me.hp = m.hp; me.alive = true; me.spawned = true; me.deadT = 0; me.killer = null; me.sliding = false; me.airMax = 0;
     me.ammo = WEAPONS.map((w) => w.mag);
     me.reloadUntil = 0; me.nextFire = 0; me.scopeToggle = false; me.pull = null; me.nades = m.nades ?? 0;
     me.charging = false; me.flight = null;
@@ -483,7 +491,7 @@ export class Game {
       me.alive = false; me.deadT = 0; me.hp = 0; me.killer = m.a;
       me.respawnAt = performance.now() + RESPAWN_MS;
       me.scoped = false; me.aiming = false; me.scopeToggle = false; me.crouch = false; me.sprinting = false;
-      me.charging = false; me.flight = null;
+      me.charging = false; me.flight = null; me.sliding = false;
       this.input.reset();
     } else {
       const v = this.players.get(m.v);
@@ -599,9 +607,14 @@ export class Game {
       if (!w.zoom && !w.ads) me.scopeToggle = false;
 
       // --- accroupi (bascule) / sprint (maintien, ou joystick à fond sur mobile) ---
-      if (inp.takeCrouchToggle() && !me.flight) me.crouch = !me.crouch;
+      // C en plein sprint au sol = glissade (vitesse, silhouette basse) au lieu de s'accroupir
+      if (inp.takeCrouchToggle() && !me.flight) {
+        if (me.sprinting && me.onGround && !me.pull && me.speed2d > WALK_SPEED * 1.1 && now >= me.slideReady) this._startSlide(now, w);
+        else if (me.sliding) this._endSlide();
+        else me.crouch = !me.crouch;
+      }
       const wantSprint = isTouch ? Math.hypot(inp.moveX, inp.moveY) > 0.85 : inp.sprintHeld;
-      me.sprinting = !!(wantSprint && !me.crouch && !me.scoped && !me.aiming && !me.charging && !me.flight);
+      me.sprinting = !!(wantSprint && !me.crouch && !me.sliding && !me.scoped && !me.aiming && !me.charging && !me.flight);
 
       // --- tir ---
       // tir maintenu pour toutes les armes (cadence de l'arme) ; tir auto si un ennemi est dans le viseur
@@ -674,8 +687,16 @@ export class Game {
         this.net.send({ t: 'pc', yaw: r(me.yaw), pitch: r(me.pitch) });
       }
     }
+    if (me.sliding && (now >= me.slideUntil || !me.alive || me.pull || me.flight || stunned)) this._endSlide();
     if (me.spawned) {
+      if (me.onGround && !me.sliding) me.airMax = speed;          // élan emporté en l'air (la glissade garde le sien)
+      else if (me.sliding) me.airMax = Math.max(speed, Math.hypot(me.vx, me.vz));
+      me.jumped = false;
+      const vyBefore = me.vy;
       stepPlayer(me, dt, wx, wz, speed, jumpNow && !me.pull, this.map);
+      if (me.jumped && me.sliding) this._endSlide();               // saut en glissade : on part avec toute la vitesse
+      if (me.onGround && !me.wasGround && vyBefore < -9) { this._landKick = Math.min(0.12, -vyBefore * 0.008); sfx.play('land'); }
+      me.wasGround = me.onGround;
       if (me.y < -10) { me.y = 3; me.vy = 0; }
       this._checkPortals(now, wx, wz);
     }
@@ -685,11 +706,25 @@ export class Game {
         me.lastSend = now;
         const r = (v) => Math.round(v * 1000) / 1000;
         const fl = me.flight; // pendant le vol, le corps garde sa direction d'avant
-        this.net.send({ t: 'in', x: r(me.x), y: r(me.y), z: r(me.z), yaw: r(fl ? me.preYaw : me.yaw), pitch: r(fl ? me.prePitch : me.pitch), w: me.weapon, c: me.crouch ? 1 : 0 });
+        this.net.send({ t: 'in', x: r(me.x), y: r(me.y), z: r(me.z), yaw: r(fl ? me.preYaw : me.yaw), pitch: r(fl ? me.prePitch : me.pitch), w: me.weapon, c: me.crouch || me.sliding ? 1 : 0 });
       }
     }
     me.speed2d = Math.hypot(me.vx, me.vz);
   }
+
+  // Glissade : élan vers l'avant (au-dessus du sprint), silhouette basse, puis courte recharge
+  _startSlide(now, w) {
+    const me = this.me;
+    const sp = Math.hypot(me.vx, me.vz);
+    const boost = Math.max(sp, WALK_SPEED * w.speed * SPRINT_MUL * me.speedMul * SLIDE_BOOST);
+    me.vx = (me.vx / sp) * boost; me.vz = (me.vz / sp) * boost;
+    me.sliding = true; me.crouch = false; me.sprinting = false;
+    me.slideUntil = now + SLIDE_MS; me.slideReady = now + SLIDE_COOLDOWN_MS;
+    this.net.send({ t: 'slide' });   // le serveur élargit un instant son contrôle de vitesse
+    sfx.play('slide');
+  }
+
+  _endSlide() { this.me.sliding = false; this.me.slideUntil = 0; }
 
   // Distance du premier ennemi touché par ce rayon (positions affichées), ou 0 si aucun avant `reach`
   _rayEnemy(ex, ey, ez, dx, dy, dz, reach) {
@@ -997,8 +1032,9 @@ export class Game {
 
   _updateCamera(dt, now) {
     const me = this.me, cam = this.camera;
-    this._crouchT += ((me.crouch ? 1 : 0) - this._crouchT) * Math.min(1, dt * 10);
-    let eye = me.y + EYE_HEIGHT - (EYE_HEIGHT - EYE_HEIGHT_CROUCH) * this._crouchT;
+    this._crouchT += ((me.crouch || me.sliding ? 1 : 0) - this._crouchT) * Math.min(1, dt * (me.sliding ? 16 : 10));
+    this._landKick = Math.max(0, (this._landKick || 0) - dt * 0.6);
+    let eye = me.y + EYE_HEIGHT - (EYE_HEIGHT - EYE_HEIGHT_CROUCH) * this._crouchT - this._landKick;
     let roll = 0;
     if (!me.alive && me.spawned) {
       const k = Math.min(1, me.deadT * 2.5);

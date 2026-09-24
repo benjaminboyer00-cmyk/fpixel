@@ -127,12 +127,35 @@ export class Hud {
     $('death-sub').textContent = seconds < 0 ? 'Tu reviens à la prochaine manche' : seconds > 0 ? `Réapparition dans ${seconds}s` : 'Réapparition…';
   }
 
-  hitmarker(kill) {
+  hitmarker(kill, head = false) {
     const e = $('hitmarker');
     e.classList.toggle('kill', !!kill);
+    e.classList.toggle('head', !!head && !kill);
     e.classList.add('on');
     clearTimeout(this.hitT);
     this.hitT = setTimeout(() => e.classList.remove('on'), 90);
+  }
+
+  // Chiffre de dégâts : position écran en fraction (0..1), monte et s'efface. Les coups rapprochés s'additionnent.
+  dmgNumber(fx, fy, amount, head, kill) {
+    const layer = $('dmg-nums');
+    if (!layer) return;
+    const now = performance.now();
+    const last = this._lastNum;
+    if (last && now - last.t < 350 && last.el.isConnected && Math.hypot(last.fx - fx, last.fy - fy) < 0.06) {
+      last.total += amount; last.t = now;                    // plombs d'un même tir / rafale : un seul chiffre
+      last.el.textContent = String(Math.round(last.total));
+      last.el.classList.toggle('head', head || last.el.classList.contains('head'));
+      last.el.classList.toggle('kill', kill);
+      return;
+    }
+    const e = el('div', { className: `dnum${head ? ' head' : ''}${kill ? ' kill' : ''}`, textContent: String(Math.round(amount)) });
+    e.style.left = `${(fx * 100).toFixed(2)}%`; e.style.top = `${(fy * 100).toFixed(2)}%`;
+    e.style.setProperty('--dx', `${Math.round((Math.random() - 0.5) * 40)}px`);
+    layer.append(e);
+    while (layer.children.length > 12) layer.firstChild.remove();
+    setTimeout(() => e.remove(), 800);
+    this._lastNum = { el: e, fx, fy, total: amount, t: now };
   }
 
   // angle en radians, 0 = l'attaquant est devant nous, positif = vers la droite
